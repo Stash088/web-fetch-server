@@ -1,0 +1,57 @@
+services:
+  searxng:
+    image: searxng/searxng:latest
+    container_name: searxng
+    restart: unless-stopped
+    ports:
+      - "8888:8080"
+    environment:
+      - SEARXNG_BASE_URL=http://localhost:8888/
+    volumes:
+      - searxng-data:/etc/searxng
+      - ./searxng/settings.yml:/etc/searxng/settings.yml:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    # resource caps: don't let SearXNG eat the whole VM (VM: 2 CPU / 4 GB)
+    mem_limit: 1g
+    memswap_limit: 1250m
+    cpus: 1.5
+    pids_limit: 128
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  web-fetch-server:
+    build: .
+    container_name: web-fetch-server
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    environment:
+      - PORT=8080
+      - SEARXNG_URL=http://searxng:8080
+      - API_KEY=${API_KEY:?set API_KEY in .env to protect the MCP endpoint}
+      - MAX_FETCH_BYTES=2097152
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      searxng:
+        condition: service_healthy
+    # resource caps: Go server is lightweight, keep it modest
+    mem_limit: 512m
+    memswap_limit: 640m
+    cpus: 1.0
+    pids_limit: 64
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  searxng-data:

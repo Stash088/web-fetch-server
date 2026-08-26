@@ -1,0 +1,34 @@
+# Internal SearXNG config for web-fetch-server.
+# See: https://docs.searxng.org/admin/settings/settings_server.html
+# This instance is private (not public), so we disable the bot limiter
+# which would otherwise return 403 for requests without X-Forwarded-For.
+use_default_settings: true
+
+server:
+  secret_key: "change-me-internal-searxng-secret"
+  limiter: false
+  public_instance: false
+  image_proxy: true
+
+search:
+  formats:
+    - html
+    - json
+
+# Disable engines that are noisy/unusable on a keyless private instance:
+#   - brave: rate-limits without an API key (suspended_time=180 warnings)
+#   - wikidata: blocked from this IP (403 from SPARQL endpoint)
+#   - startpage: blocks this IP (404)
+#   - ahmia, torch: fail to load in this image
+#   - google cse, duckduckgo: keep enabled for results
+engines:
+  - name: brave
+    disabled: true
+  - name: wikidata
+    disabled: true
+  - name: startpage
+    disabled: true
+  - name: ahmia
+    disabled: true
+  - name: torch
+    disabled: true

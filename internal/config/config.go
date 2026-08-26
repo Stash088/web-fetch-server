@@ -1,0 +1,81 @@
+package config
+
+import (
+	"log/slog"
+	"os"
+	"strconv"
+	"time"
+)
+
+type Config struct {
+	Port          string
+	MCPPath       string
+	APIKey        string // required Bearer token for MCP access
+	SearxngURL    string
+	SearxngKey    string // optional SearXNG API key
+	MaxFetchBytes int64
+	FetchTimeout  time.Duration
+	UserAgent     string
+	DefaultMaxLen int
+	MaxResults    int
+	LogLevel      slog.Level
+}
+
+func Load() Config {
+	logLevel := slog.LevelInfo
+	switch os.Getenv("LOG_LEVEL") {
+	case "debug", "DEBUG":
+		logLevel = slog.LevelDebug
+	case "warn", "WARN":
+		logLevel = slog.LevelWarn
+	case "error", "ERROR":
+		logLevel = slog.LevelError
+	}
+	return Config{
+		Port:          getEnv("PORT", "8080"),
+		MCPPath:       getEnv("MCP_PATH", "/mcp"),
+		APIKey:        os.Getenv("API_KEY"),
+		SearxngURL:    getEnv("SEARXNG_URL", "http://localhost:8888"),
+		SearxngKey:    os.Getenv("SEARXNG_KEY"),
+		MaxFetchBytes: getEnvInt64("MAX_FETCH_BYTES", 2<<20),
+		FetchTimeout:  getEnvDur("FETCH_TIMEOUT", 20*time.Second),
+		UserAgent:     getEnv("USER_AGENT", "web-fetch-server/0.1 (+MCP; search&fetch provider)"),
+		DefaultMaxLen: getEnvInt("DEFAULT_MAX_LEN", 8000),
+		MaxResults:    getEnvInt("MAX_RESULTS", 10),
+		LogLevel:      logLevel,
+	}
+}
+
+func getEnv(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
+}
+
+func getEnvInt(key string, def int) int {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func getEnvInt64(key string, def int64) int64 {
+	if v := os.Getenv(key); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 64); err == nil {
+			return n
+		}
+	}
+	return def
+}
+
+func getEnvDur(key string, def time.Duration) time.Duration {
+	if v := os.Getenv(key); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			return d
+		}
+	}
+	return def
+}
