@@ -42,10 +42,15 @@ services:
       - API_KEYS=${API_KEYS:-${API_KEY:-}}
       - MAX_FETCH_BYTES=2097152
       - LOG_LEVEL=${LOG_LEVEL:-info}
+      - TLS_FINGERPRINT=${TLS_FINGERPRINT:-chrome}
+      - JS_RENDER=${JS_RENDER:-never}
+      - JS_RENDER_TIMEOUT=${JS_RENDER_TIMEOUT:-30s}
+      - CHROME_BIN=${CHROME_BIN:-}
     depends_on:
       searxng:
         condition: service_healthy
-    # resource caps: Go server is lightweight, keep it modest
+    # resource caps: Go server is lightweight, keep it modest. If you enable
+    # JS_RENDER (headless Chromium) raise mem_limit to ~1g/2g.
     mem_limit: 512m
     memswap_limit: 640m
     cpus: 1.0

@@ -9,9 +9,9 @@ import (
 )
 
 type Config struct {
-	Port     string
-	MCPPath  string
-	APIKeys  []string // Bearer tokens accepted for MCP access; empty = open
+	Port          string
+	MCPPath       string
+	APIKeys       []string // Bearer tokens accepted for MCP access; empty = open
 	SearxngURL    string
 	SearxngKey    string // optional SearXNG API key
 	MaxFetchBytes int64
@@ -20,6 +20,16 @@ type Config struct {
 	DefaultMaxLen int
 	MaxResults    int
 	LogLevel      slog.Level
+	// TLSFingerprint controls the TLS ClientHello fingerprint sent by the
+	// fetch client: "chrome" (uTLS, mimics Chrome) or "off" (stdlib TLS).
+	TLSFingerprint string
+	// JSRenderMode controls JS rendering via a headless browser:
+	// "never" (default), "auto" (fallback on block) or "always".
+	JSRenderMode string
+	// JSRenderTimeout bounds a single browser render.
+	JSRenderTimeout time.Duration
+	// ChromeBin overrides the Chrome/Chromium binary path (empty = auto-detect).
+	ChromeBin string
 	// BlockPrivateNetworks enables SSRF protection: rejects private, loopback
 	// and other unsafe address ranges in web_fetch targets.
 	BlockPrivateNetworks bool
@@ -36,17 +46,21 @@ func Load() Config {
 		logLevel = slog.LevelError
 	}
 	return Config{
-		Port:          getEnv("PORT", "8080"),
-		MCPPath:       getEnv("MCP_PATH", "/mcp"),
-		APIKeys:       loadAPIKeys(),
-		SearxngURL:    getEnv("SEARXNG_URL", "http://localhost:8888"),
-		SearxngKey:    os.Getenv("SEARXNG_KEY"),
-		MaxFetchBytes: getEnvInt64("MAX_FETCH_BYTES", 2<<20),
-		FetchTimeout:  getEnvDur("FETCH_TIMEOUT", 20*time.Second),
-		UserAgent:     getEnv("USER_AGENT", "web-fetch-server/0.1 (+MCP; search&fetch provider)"),
-		DefaultMaxLen: getEnvInt("DEFAULT_MAX_LEN", 8000),
-		MaxResults:    getEnvInt("MAX_RESULTS", 10),
-		LogLevel:      logLevel,
+		Port:                 getEnv("PORT", "8080"),
+		MCPPath:              getEnv("MCP_PATH", "/mcp"),
+		APIKeys:              loadAPIKeys(),
+		SearxngURL:           getEnv("SEARXNG_URL", "http://localhost:8888"),
+		SearxngKey:           os.Getenv("SEARXNG_KEY"),
+		MaxFetchBytes:        getEnvInt64("MAX_FETCH_BYTES", 2<<20),
+		FetchTimeout:         getEnvDur("FETCH_TIMEOUT", 20*time.Second),
+		UserAgent:            getEnv("USER_AGENT", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
+		DefaultMaxLen:        getEnvInt("DEFAULT_MAX_LEN", 8000),
+		MaxResults:           getEnvInt("MAX_RESULTS", 10),
+		LogLevel:             logLevel,
+		TLSFingerprint:       getEnv("TLS_FINGERPRINT", "chrome"),
+		JSRenderMode:         getEnv("JS_RENDER", "never"),
+		JSRenderTimeout:      getEnvDur("JS_RENDER_TIMEOUT", 30*time.Second),
+		ChromeBin:            os.Getenv("CHROME_BIN"),
 		BlockPrivateNetworks: getEnvBool("BLOCK_PRIVATE_NETWORKS", true),
 	}
 }

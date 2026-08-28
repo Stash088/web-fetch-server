@@ -33,11 +33,15 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger) *mcp.Server {
 
 	searchClient := search.NewClientWithLogger(cfg.SearxngURL, cfg.SearxngKey, cfg.FetchTimeout, logger)
 	fetchClient := fetch.NewClientWithOptions(fetch.Options{
-		Timeout:      cfg.FetchTimeout,
-		MaxBody:      cfg.MaxFetchBytes,
-		UserAgent:    cfg.UserAgent,
-		BlockPrivate: cfg.BlockPrivateNetworks,
-		Logger:       logger,
+		Timeout:         cfg.FetchTimeout,
+		MaxBody:         cfg.MaxFetchBytes,
+		UserAgent:       cfg.UserAgent,
+		BlockPrivate:    cfg.BlockPrivateNetworks,
+		TLSFingerprint:  cfg.TLSFingerprint,
+		JSRenderMode:    cfg.JSRenderMode,
+		JSRenderTimeout: cfg.JSRenderTimeout,
+		ChromeBin:       cfg.ChromeBin,
+		Logger:          logger,
 	})
 
 	type searchArgs struct {
@@ -86,6 +90,7 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger) *mcp.Server {
 		MaxLength  *int    `json:"max_length,omitempty" jsonschema:"maximum number of characters to return, default 8000"`
 		StartIndex *int    `json:"start_index,omitempty" jsonschema:"start reading content from this character index, default 0"`
 		Format     *string `json:"format,omitempty" jsonschema:"output format: markdown (default) or text"`
+		Render     *bool   `json:"render,omitempty" jsonschema:"render with a headless browser (JS) instead of fetching raw HTML, default false"`
 	}
 	type fetchOut struct {
 		Title      string `json:"title"`
@@ -96,7 +101,7 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger) *mcp.Server {
 	}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "web_fetch",
-		Description: "Fetch a web page and return its content as markdown or text. For long pages, use start_index to read in chunks.",
+		Description: "Fetch a web page and return its content as markdown or text. For long pages, use start_index to read in chunks. Set render=true to load the page in a headless browser (handles JS-rendered content and some bot protections).",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in fetchArgs) (*mcp.CallToolResult, fetchOut, error) {
 		logger.Info("[request] tool web_fetch",
 			"tool", "web_fetch",
@@ -104,8 +109,9 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger) *mcp.Server {
 			"max_length", in.MaxLength,
 			"start_index", in.StartIndex,
 			"format", in.Format,
+			"render", in.Render,
 		)
-		page, err := fetchClient.Fetch(ctx, in.URL)
+		page, err := fetchClient.FetchWithOptions(ctx, in.URL, fetch.FetchOptions{Render: in.Render != nil && *in.Render})
 		if err != nil {
 			return nil, fetchOut{}, err
 		}

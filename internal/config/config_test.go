@@ -2,15 +2,17 @@ package config
 
 import (
 	"reflect"
+	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadAPIKeys(t *testing.T) {
 	tests := []struct {
-		name     string
-		apiKeys  string
-		apiKey   string
-		want     []string
+		name    string
+		apiKeys string
+		apiKey  string
+		want    []string
 	}{
 		{
 			name:    "multiple keys",
@@ -33,9 +35,9 @@ func TestLoadAPIKeys(t *testing.T) {
 			want:    []string{"only-one"},
 		},
 		{
-			name:    "fallback to legacy API_KEY",
-			apiKey:  "legacy-secret",
-			want:    []string{"legacy-secret"},
+			name:   "fallback to legacy API_KEY",
+			apiKey: "legacy-secret",
+			want:   []string{"legacy-secret"},
 		},
 		{
 			name:    "API_KEYS takes precedence over API_KEY",
@@ -73,5 +75,47 @@ func TestParseKeys(t *testing.T) {
 	want := []string{"a", "b", "c"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("parseKeys() = %v, want %v", got, want)
+	}
+}
+
+func TestLoadBrowserOptions(t *testing.T) {
+	t.Setenv("TLS_FINGERPRINT", "off")
+	t.Setenv("JS_RENDER", "auto")
+	t.Setenv("JS_RENDER_TIMEOUT", "45s")
+	t.Setenv("CHROME_BIN", "/usr/bin/chromium")
+	cfg := Load()
+
+	if cfg.TLSFingerprint != "off" {
+		t.Errorf("TLSFingerprint = %q, want off", cfg.TLSFingerprint)
+	}
+	if cfg.JSRenderMode != "auto" {
+		t.Errorf("JSRenderMode = %q, want auto", cfg.JSRenderMode)
+	}
+	if cfg.JSRenderTimeout != 45*time.Second {
+		t.Errorf("JSRenderTimeout = %v, want 45s", cfg.JSRenderTimeout)
+	}
+	if cfg.ChromeBin != "/usr/bin/chromium" {
+		t.Errorf("ChromeBin = %q, want /usr/bin/chromium", cfg.ChromeBin)
+	}
+}
+
+func TestLoadBrowserDefaults(t *testing.T) {
+	t.Setenv("TLS_FINGERPRINT", "")
+	t.Setenv("JS_RENDER", "")
+	t.Setenv("JS_RENDER_TIMEOUT", "")
+	t.Setenv("CHROME_BIN", "")
+	cfg := Load()
+
+	if cfg.TLSFingerprint != "chrome" {
+		t.Errorf("TLSFingerprint default = %q, want chrome", cfg.TLSFingerprint)
+	}
+	if cfg.JSRenderMode != "never" {
+		t.Errorf("JSRenderMode default = %q, want never", cfg.JSRenderMode)
+	}
+	if cfg.JSRenderTimeout != 30*time.Second {
+		t.Errorf("JSRenderTimeout default = %v, want 30s", cfg.JSRenderTimeout)
+	}
+	if !strings.HasPrefix(cfg.UserAgent, "Mozilla/5.0") {
+		t.Errorf("UserAgent default = %q, want a browser-like UA", cfg.UserAgent)
 	}
 }
