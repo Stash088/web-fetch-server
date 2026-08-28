@@ -5,3 +5,4 @@ web-fetch-server
 opencode.json
 __pycache__/
 loadtest_mcp.py
+ROADMAP.md

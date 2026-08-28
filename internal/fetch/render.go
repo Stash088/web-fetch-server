@@ -57,6 +57,14 @@ func (r *chromeRenderer) Render(ctx context.Context, u *url.URL, ua string) (*Pa
 		chromedp.Flag("blink-settings", "imagesEnabled=false"),
 		chromedp.UserAgent(ua),
 		chromedp.Flag("accept-language", "en-US,en;q=0.9,ru;q=0.8"),
+		chromedp.WindowSize(1366, 768),
+		// Anti-detection: chromedp defaults to enable-automation=true, which
+		// makes window.navigator.webdriver=true and is a dead giveaway to
+		// Cloudflare-style bot challenges. Flip it off and use the modern
+		// headless mode, which looks like a normal browser.
+		chromedp.Flag("enable-automation", false),
+		chromedp.Flag("disable-blink-features", "AutomationControlled"),
+		chromedp.Flag("headless", "new"),
 	}
 	if r.opts.ChromeBin != "" {
 		execOpts = append(execOpts, chromedp.ExecPath(r.opts.ChromeBin))
@@ -71,7 +79,7 @@ func (r *chromeRenderer) Render(ctx context.Context, u *url.URL, ua string) (*Pa
 	err := chromedp.Run(browserCtx,
 		chromedp.Navigate(u.String()),
 		chromedp.WaitReady("body", chromedp.ByQuery),
-		chromedp.Sleep(500*time.Millisecond),
+		waitChallenge(browserCtx, 20*time.Second),
 		chromedp.Title(&title),
 		chromedp.OuterHTML("html", &html, chromedp.ByQuery),
 	)
@@ -91,6 +99,38 @@ func (r *chromeRenderer) Render(ctx context.Context, u *url.URL, ua string) (*Pa
 	)
 
 	return &Page{URL: u.String(), Title: strings.TrimSpace(title), Body: body, MediaType: "text/html"}, nil
+}
+
+// waitChallenge waits until the page title no longer looks like a bot
+// challenge (Cloudflare "Just a moment...", "Performing security verification",
+// etc.) or until timeout. Many challenges auto-resolve after a few seconds in
+// a real browser.
+func waitChallenge(ctx context.Context, timeout time.Duration) chromedp.Action {
+	deadline := time.Now().Add(timeout)
+	var title string
+	return chromedp.ActionFunc(func(ctx context.Context) error {
+		for time.Now().Before(deadline) {
+			if err := chromedp.Title(&title).Do(ctx); err != nil {
+				return err
+			}
+			lower := strings.ToLower(title)
+			challenge := strings.Contains(lower, "just a moment") ||
+				strings.Contains(lower, "security verification") ||
+				strings.Contains(lower, "checking your browser") ||
+				strings.Contains(lower, "attention required") ||
+				strings.Contains(lower, "verify you are human") ||
+				strings.Contains(lower, "verifying")
+			if !challenge && title != "" {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(500 * time.Millisecond):
+			}
+		}
+		return nil
+	})
 }
 
 // ensureChrome verifies a usable Chrome/Chromium binary exists, producing a

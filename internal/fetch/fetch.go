@@ -142,14 +142,14 @@ func NewClientWithOptions(opts Options) *Client {
 	}
 	guard := security.NetworkGuard{BlockPrivateNetworks: opts.BlockPrivate, LookupIP: opts.LookupIP}
 
-	var renderer Renderer
-	if renderMode != renderNever {
-		renderer = NewChromeRenderer(RendererOptions{
-			ChromeBin: opts.ChromeBin,
-			MaxBody:   opts.MaxBody,
-			Logger:    opts.Logger,
-		})
-	}
+	// The renderer is always created so that a per-call render=true works even
+	// when JS_RENDER=never; ensureChrome() gives a clear error if no browser
+	// binary is present. renderMode only controls the auto-fallback.
+	renderer := NewChromeRenderer(RendererOptions{
+		ChromeBin: opts.ChromeBin,
+		MaxBody:   opts.MaxBody,
+		Logger:    opts.Logger,
+	})
 
 	return &Client{
 		http:          hc,
