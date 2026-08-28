@@ -15,7 +15,7 @@ func TestFetchBasic(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(5*time.Second, 1<<20, "test-agent/1.0")
+	c := NewClientWithOptions(Options{Timeout: 5 * time.Second, MaxBody: 1 << 20, UserAgent: "test-agent/1.0"})
 	page, err := c.Fetch(context.Background(), srv.URL)
 	if err != nil {
 		t.Fatalf("fetch: %v", err)
@@ -29,7 +29,7 @@ func TestFetchBasic(t *testing.T) {
 }
 
 func TestFetchRejectsNonHTTP(t *testing.T) {
-	c := NewClient(5*time.Second, 1<<20, "test-agent/1.0")
+	c := NewClientWithOptions(Options{Timeout: 5 * time.Second, MaxBody: 1 << 20, UserAgent: "test-agent/1.0"})
 	if _, err := c.Fetch(context.Background(), "ftp://example.com/x"); err == nil {
 		t.Fatal("expected error for ftp URL")
 	}
@@ -41,7 +41,7 @@ func TestFetchErrorStatus(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(5*time.Second, 1<<20, "test-agent/1.0")
+	c := NewClientWithOptions(Options{Timeout: 5 * time.Second, MaxBody: 1 << 20, UserAgent: "test-agent/1.0"})
 	if _, err := c.Fetch(context.Background(), srv.URL); err == nil {
 		t.Fatal("expected error on 404")
 	}
@@ -55,7 +55,7 @@ func TestFetchSendsUserAgent(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(5*time.Second, 1<<20, "test-agent/1.0")
+	c := NewClientWithOptions(Options{Timeout: 5 * time.Second, MaxBody: 1 << 20, UserAgent: "test-agent/1.0"})
 	if _, err := c.Fetch(context.Background(), srv.URL); err != nil {
 		t.Fatalf("fetch: %v", err)
 	}

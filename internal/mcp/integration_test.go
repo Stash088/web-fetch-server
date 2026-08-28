@@ -22,6 +22,7 @@ func TestWebFetchToolEndToEnd(t *testing.T) {
 	defer pageSrv.Close()
 
 	cfg := config.Load()
+	cfg.BlockPrivateNetworks = false
 	server := Build(cfg)
 
 	client := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "0"}, nil)

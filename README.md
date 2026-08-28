@@ -65,6 +65,7 @@ API_KEY=super-secret-token SEARXNG_URL=http://localhost:8888 go run ./cmd/server
 | `USER_AGENT`     | `web-fetch-server/...` | User-Agent sent to target sites                |
 | `DEFAULT_MAX_LEN`| `8000`                 | Default `max_length` for `web_fetch`           |
 | `MAX_RESULTS`    | `10`                   | Default `max_results` for `web_search`           |
+| `BLOCK_PRIVATE_NETWORKS` | `true`          | SSRF protection: reject private/loopback ranges in `web_fetch` targets |
 | `LOG_LEVEL`      | `info`                 | `debug`, `info`, `warn`, `error` — logging verbosity |
 
 ## Connecting opencode

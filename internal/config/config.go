@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -19,6 +20,9 @@ type Config struct {
 	DefaultMaxLen int
 	MaxResults    int
 	LogLevel      slog.Level
+	// BlockPrivateNetworks enables SSRF protection: rejects private, loopback
+	// and other unsafe address ranges in web_fetch targets.
+	BlockPrivateNetworks bool
 }
 
 func Load() Config {
@@ -43,6 +47,7 @@ func Load() Config {
 		DefaultMaxLen: getEnvInt("DEFAULT_MAX_LEN", 8000),
 		MaxResults:    getEnvInt("MAX_RESULTS", 10),
 		LogLevel:      logLevel,
+		BlockPrivateNetworks: getEnvBool("BLOCK_PRIVATE_NETWORKS", true),
 	}
 }
 
@@ -76,6 +81,16 @@ func getEnvDur(key string, def time.Duration) time.Duration {
 		if d, err := time.ParseDuration(v); err == nil {
 			return d
 		}
+	}
+	return def
+}
+
+func getEnvBool(key string, def bool) bool {
+	switch strings.ToLower(os.Getenv(key)) {
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
 	}
 	return def
 }

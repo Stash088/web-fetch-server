@@ -32,7 +32,13 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger) *mcp.Server {
 	}, nil)
 
 	searchClient := search.NewClientWithLogger(cfg.SearxngURL, cfg.SearxngKey, cfg.FetchTimeout, logger)
-	fetchClient := fetch.NewClientWithLogger(cfg.FetchTimeout, cfg.MaxFetchBytes, cfg.UserAgent, logger)
+	fetchClient := fetch.NewClientWithOptions(fetch.Options{
+		Timeout:      cfg.FetchTimeout,
+		MaxBody:      cfg.MaxFetchBytes,
+		UserAgent:    cfg.UserAgent,
+		BlockPrivate: cfg.BlockPrivateNetworks,
+		Logger:       logger,
+	})
 
 	type searchArgs struct {
 		Query      string  `json:"query" jsonschema:"the search query"`
