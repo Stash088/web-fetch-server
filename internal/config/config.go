@@ -9,9 +9,9 @@ import (
 )
 
 type Config struct {
-	Port          string
-	MCPPath       string
-	APIKey        string // required Bearer token for MCP access
+	Port     string
+	MCPPath  string
+	APIKeys  []string // Bearer tokens accepted for MCP access; empty = open
 	SearxngURL    string
 	SearxngKey    string // optional SearXNG API key
 	MaxFetchBytes int64
@@ -38,7 +38,7 @@ func Load() Config {
 	return Config{
 		Port:          getEnv("PORT", "8080"),
 		MCPPath:       getEnv("MCP_PATH", "/mcp"),
-		APIKey:        os.Getenv("API_KEY"),
+		APIKeys:       loadAPIKeys(),
 		SearxngURL:    getEnv("SEARXNG_URL", "http://localhost:8888"),
 		SearxngKey:    os.Getenv("SEARXNG_KEY"),
 		MaxFetchBytes: getEnvInt64("MAX_FETCH_BYTES", 2<<20),
@@ -56,6 +56,38 @@ func getEnv(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// loadAPIKeys reads the accepted Bearer tokens for MCP access. API_KEYS takes
+// precedence (comma-separated list); API_KEY is kept as a legacy alias for a
+// single key when API_KEYS is unset.
+func loadAPIKeys() []string {
+	if raw := os.Getenv("API_KEYS"); raw != "" {
+		if keys := parseKeys(raw); len(keys) > 0 {
+			return keys
+		}
+	}
+	if k := os.Getenv("API_KEY"); k != "" {
+		return []string{k}
+	}
+	return nil
+}
+
+func parseKeys(raw string) []string {
+	seen := map[string]struct{}{}
+	var keys []string
+	for _, part := range strings.Split(raw, ",") {
+		k := strings.TrimSpace(part)
+		if k == "" {
+			continue
+		}
+		if _, dup := seen[k]; dup {
+			continue
+		}
+		seen[k] = struct{}{}
+		keys = append(keys, k)
+	}
+	return keys
 }
 
 func getEnvInt(key string, def int) int {

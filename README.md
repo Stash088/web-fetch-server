@@ -31,7 +31,7 @@ the private search backend; this server is the single public gateway.
 Bring up both SearXNG and this server:
 
 ```bash
-export API_KEY=super-secret-token   # required, protects /mcp
+export API_KEYS=super-secret-token-1,super-secret-token-2   # required, protects /mcp
 docker compose up -d --build
 ```
 
@@ -48,7 +48,7 @@ use an existing SearXNG instance, set `SEARXNG_URL` to it.
 docker run -d -p 8888:8080 -e SEARXNG_BASE_URL=http://localhost:8888/ searxng/searxng
 
 # 2. this server
-API_KEY=super-secret-token SEARXNG_URL=http://localhost:8888 go run ./cmd/server
+API_KEYS=key-for-user-a,key-for-user-b SEARXNG_URL=http://localhost:8888 go run ./cmd/server
 ```
 
 ## Configuration (env vars)
@@ -57,7 +57,8 @@ API_KEY=super-secret-token SEARXNG_URL=http://localhost:8888 go run ./cmd/server
 |------------------|------------------------|-----------------------------------------------|
 | `PORT`           | `8080`                 | HTTP listen port                              |
 | `MCP_PATH`       | `/mcp`                 | MCP endpoint path                             |
-| `API_KEY`        | *(empty)*              | **Required** Bearer token for `/mcp`. If unset the endpoint is open — set it in production. |
+| `API_KEYS`      | *(empty)*              | **Required** Comma-separated Bearer tokens for `/mcp` — one per user. If unset the endpoint is open — set it in production. |
+| `API_KEY`       | *(empty)*              | Legacy alias for a single key. Used only when `API_KEYS` is unset. |
 | `SEARXNG_URL`    | `http://localhost:8888`| Base URL of SearXNG                            |
 | `SEARXNG_KEY`    | *(empty)*              | Optional SearXNG API key (Bearer)             |
 | `MAX_FETCH_BYTES`| `2097152` (2 MiB)      | Max body size fetched from a page              |
@@ -133,7 +134,9 @@ Example (`docker compose logs -f web-fetch-server`):
 
 ## Notes / roadmap
 
-- Auth: Bearer token enforced via middleware. OAuth (Dynamic Client Registration)
+- Auth: Bearer tokens enforced via middleware. Configure one key per user via
+  `API_KEYS` (comma-separated); the requesting key is logged as a `key_id`
+  fingerprint so you can see who called. OAuth (Dynamic Client Registration)
   is a possible phase-2 addition for public deployments.
 - Optional LLM summarization (`web_extract`) is a future extension.
 - Security: `web_fetch` only allows `http`/`https` URLs; body size is capped.
