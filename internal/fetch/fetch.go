@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -25,7 +26,9 @@ type Options struct {
 	UserAgent    string
 	MaxRedirects int
 	BlockPrivate bool
-	Logger       *slog.Logger
+	// LookupIP overrides DNS resolution used by the SSRF guard (for tests).
+	LookupIP func(ctx context.Context, network, host string) ([]net.IP, error)
+	Logger   *slog.Logger
 }
 
 type Client struct {
@@ -69,7 +72,7 @@ func NewClientWithOptions(opts Options) *Client {
 			return nil
 		},
 	}
-	guard := security.NetworkGuard{BlockPrivateNetworks: opts.BlockPrivate}
+	guard := security.NetworkGuard{BlockPrivateNetworks: opts.BlockPrivate, LookupIP: opts.LookupIP}
 	return &Client{
 		http:    hc,
 		maxBody: opts.MaxBody,
@@ -112,7 +115,7 @@ func (c *Client) Fetch(ctx context.Context, rawURL string) (*Page, error) {
 	}
 
 	// SSRF protection: validate the host before making the request.
-	if err := c.guard.ResolveAndValidateHost(ctx, u.Host); err != nil {
+	if err := c.guard.ResolveAndValidateHost(ctx, u.Hostname()); err != nil {
 		return nil, fmt.Errorf("blocked by network policy: %w", err)
 	}
 
