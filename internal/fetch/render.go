@@ -2,6 +2,7 @@ package fetch
 
 import (
 	"context"
+	_ "embed"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,10 +10,35 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/chromedp/chromedp"
 )
+
+// stealthJS is the go-rod/stealth script (MIT, JSVersion v2.7.3) that patches
+// the automation leaks headless Chrome exposes: navigator.webdriver, plugins,
+// languages, hardwareConcurrency, WebGL vendor/renderer, window.chrome and
+// more. It is injected before page scripts run on every new document.
+//
+//go:embed stealth/stealth.js
+var stealthJS string
+
+// renderProfile is a coherent browser persona: a mismatched combination
+// (e.g. en-US locale + Moscow timezone) is itself a bot signal.
+type renderProfile struct {
+	lang string
+	tz   string
+	w, h int
+}
+
+// renderProfiles is the small pool of plausible personas randomized per render.
+var renderProfiles = []renderProfile{
+	{lang: "en-US,en;q=0.9", tz: "America/New_York", w: 1366, h: 768},
+	{lang: "en-US,en;q=0.9,ru;q=0.8", tz: "America/Chicago", w: 1536, h: 864},
+	{lang: "en-GB,en;q=0.9", tz: "Europe/London", w: 1440, h: 900},
+	{lang: "ru-RU,ru;q=0.9,en-US;q=0.8", tz: "Europe/Moscow", w: 1920, h: 1080},
+}
 
 // Renderer fetches a URL with a real browser so that JS-rendered content and
 // WAF browser challenges are handled.
@@ -23,15 +49,27 @@ type Renderer interface {
 type RendererOptions struct {
 	ChromeBin string
 	MaxBody   int64
-	Logger    *slog.Logger
+	// ProfileDir is the base directory for persistent browser profiles
+	// (RENDER_PROFILE_DIR); empty uses a default under the system tmpdir.
+	ProfileDir string
+	// PoolSize is the number of pooled browser processes (RENDER_POOL_SIZE).
+	PoolSize int
+	Logger   *slog.Logger
 }
 
+// chromeRenderer serves Render calls through a lazily created
+// RenderSessionManager: the browser processes and their cookie profiles stay
+// alive between renders instead of being spawned fresh every time.
 type chromeRenderer struct {
 	opts   RendererOptions
 	logger *slog.Logger
+
+	mu      sync.Mutex
+	manager *RenderSessionManager
 }
 
-// NewChromeRenderer returns a Renderer backed by a headless Chrome/Chromium.
+// NewChromeRenderer returns a Renderer backed by pooled headless
+// Chrome/Chromium sessions.
 func NewChromeRenderer(opts RendererOptions) Renderer {
 	if opts.Logger == nil {
 		opts.Logger = slog.Default()
@@ -39,66 +77,43 @@ func NewChromeRenderer(opts RendererOptions) Renderer {
 	return &chromeRenderer{opts: opts, logger: opts.Logger}
 }
 
-// Render navigates a headless browser to u and returns the rendered HTML.
+// Render navigates a pooled browser session to u and returns the rendered HTML.
 func (r *chromeRenderer) Render(ctx context.Context, u *url.URL, ua string) (*Page, error) {
 	if err := r.ensureChrome(); err != nil {
 		return nil, err
 	}
-
-	execOpts := []chromedp.ExecAllocatorOption{
-		chromedp.NoFirstRun,
-		chromedp.NoDefaultBrowserCheck,
-		chromedp.Headless,
-		chromedp.DisableGPU,
-		chromedp.NoSandbox,
-		chromedp.Flag("disable-dev-shm-usage", true),
-		chromedp.Flag("disable-extensions", true),
-		chromedp.Flag("disable-background-networking", true),
-		chromedp.Flag("blink-settings", "imagesEnabled=false"),
-		chromedp.UserAgent(ua),
-		chromedp.Flag("accept-language", "en-US,en;q=0.9,ru;q=0.8"),
-		chromedp.WindowSize(1366, 768),
-		// Anti-detection: chromedp defaults to enable-automation=true, which
-		// makes window.navigator.webdriver=true and is a dead giveaway to
-		// Cloudflare-style bot challenges. Flip it off and use the modern
-		// headless mode, which looks like a normal browser.
-		chromedp.Flag("enable-automation", false),
-		chromedp.Flag("disable-blink-features", "AutomationControlled"),
-		chromedp.Flag("headless", "new"),
-	}
-	if r.opts.ChromeBin != "" {
-		execOpts = append(execOpts, chromedp.ExecPath(r.opts.ChromeBin))
-	}
-
-	allocCtx, cancelAlloc := chromedp.NewExecAllocator(ctx, execOpts...)
-	defer cancelAlloc()
-	browserCtx, cancelBrowser := chromedp.NewContext(allocCtx)
-	defer cancelBrowser()
-
-	var html, title string
-	err := chromedp.Run(browserCtx,
-		chromedp.Navigate(u.String()),
-		chromedp.WaitReady("body", chromedp.ByQuery),
-		waitChallenge(browserCtx, 20*time.Second),
-		chromedp.Title(&title),
-		chromedp.OuterHTML("html", &html, chromedp.ByQuery),
-	)
+	m, err := r.sessionManager()
 	if err != nil {
-		return nil, fmt.Errorf("render %s: %w", u.String(), err)
+		return nil, err
 	}
+	return m.Render(ctx, u, ua)
+}
 
-	body := []byte(html)
-	if r.opts.MaxBody > 0 && int64(len(body)) > r.opts.MaxBody {
-		body = body[:r.opts.MaxBody]
+// Close shuts down all pooled browser sessions.
+func (r *chromeRenderer) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.manager != nil {
+		r.manager.Close()
+		r.manager = nil
 	}
+}
 
-	r.logger.Info("[response] fetch (js render)",
-		"url", u.String(),
-		"bytes", len(body),
-		"title", strings.TrimSpace(title),
-	)
-
-	return &Page{URL: u.String(), Title: strings.TrimSpace(title), Body: body, MediaType: "text/html"}, nil
+// sessionManager lazily starts the session pool on first use; if no browser
+// is available the later Render call produces the clear ensureChrome error.
+func (r *chromeRenderer) sessionManager() (*RenderSessionManager, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.manager == nil {
+		r.manager = NewRenderSessionManager(RenderSessionOptions{
+			ChromeBin:  r.opts.ChromeBin,
+			ProfileDir: r.opts.ProfileDir,
+			PoolSize:   r.opts.PoolSize,
+			MaxBody:    r.opts.MaxBody,
+			Logger:     r.logger,
+		})
+	}
+	return r.manager, nil
 }
 
 // waitChallenge waits until the page title no longer looks like a bot
@@ -113,14 +128,7 @@ func waitChallenge(ctx context.Context, timeout time.Duration) chromedp.Action {
 			if err := chromedp.Title(&title).Do(ctx); err != nil {
 				return err
 			}
-			lower := strings.ToLower(title)
-			challenge := strings.Contains(lower, "just a moment") ||
-				strings.Contains(lower, "security verification") ||
-				strings.Contains(lower, "checking your browser") ||
-				strings.Contains(lower, "attention required") ||
-				strings.Contains(lower, "verify you are human") ||
-				strings.Contains(lower, "verifying")
-			if !challenge && title != "" {
+			if !challengeTitle(strings.ToLower(title)) {
 				return nil
 			}
 			select {

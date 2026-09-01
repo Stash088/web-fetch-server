@@ -30,6 +30,11 @@ type Config struct {
 	JSRenderTimeout time.Duration
 	// ChromeBin overrides the Chrome/Chromium binary path (empty = auto-detect).
 	ChromeBin string
+	// RenderProfileDir is the base directory for persistent render browser
+	// profiles (cookie/session reuse between renders). Empty = tmpdir default.
+	RenderProfileDir string
+	// RenderPoolSize is the number of pooled render browser processes.
+	RenderPoolSize int
 	// BlockPrivateNetworks enables SSRF protection: rejects private, loopback
 	// and other unsafe address ranges in web_fetch targets.
 	BlockPrivateNetworks bool
@@ -61,6 +66,8 @@ func Load() Config {
 		JSRenderMode:         getEnv("JS_RENDER", "never"),
 		JSRenderTimeout:      getEnvDur("JS_RENDER_TIMEOUT", 30*time.Second),
 		ChromeBin:            os.Getenv("CHROME_BIN"),
+		RenderProfileDir:     os.Getenv("RENDER_PROFILE_DIR"),
+		RenderPoolSize:       getEnvInt("RENDER_POOL_SIZE", 1),
 		BlockPrivateNetworks: getEnvBool("BLOCK_PRIVATE_NETWORKS", true),
 	}
 }

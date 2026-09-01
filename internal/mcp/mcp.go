@@ -33,15 +33,17 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger) *mcp.Server {
 
 	searchClient := search.NewClientWithLogger(cfg.SearxngURL, cfg.SearxngKey, cfg.FetchTimeout, logger)
 	fetchClient := fetch.NewClientWithOptions(fetch.Options{
-		Timeout:         cfg.FetchTimeout,
-		MaxBody:         cfg.MaxFetchBytes,
-		UserAgent:       cfg.UserAgent,
-		BlockPrivate:    cfg.BlockPrivateNetworks,
-		TLSFingerprint:  cfg.TLSFingerprint,
-		JSRenderMode:    cfg.JSRenderMode,
-		JSRenderTimeout: cfg.JSRenderTimeout,
-		ChromeBin:       cfg.ChromeBin,
-		Logger:          logger,
+		Timeout:          cfg.FetchTimeout,
+		MaxBody:          cfg.MaxFetchBytes,
+		UserAgent:        cfg.UserAgent,
+		BlockPrivate:     cfg.BlockPrivateNetworks,
+		TLSFingerprint:   cfg.TLSFingerprint,
+		JSRenderMode:     cfg.JSRenderMode,
+		JSRenderTimeout:  cfg.JSRenderTimeout,
+		ChromeBin:        cfg.ChromeBin,
+		RenderProfileDir: cfg.RenderProfileDir,
+		RenderPoolSize:   cfg.RenderPoolSize,
+		Logger:           logger,
 	})
 
 	type searchArgs struct {

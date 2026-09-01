@@ -53,6 +53,12 @@ type Options struct {
 	JSRenderTimeout time.Duration
 	// ChromeBin overrides the Chrome/Chromium binary path (empty = auto-detect).
 	ChromeBin string
+	// RenderProfileDir is the base dir for persistent render browser profiles
+	// (RENDER_PROFILE_DIR); empty uses a default under the system tmpdir.
+	RenderProfileDir string
+	// RenderPoolSize is the number of pooled render browsers
+	// (RENDER_POOL_SIZE); 0 or below defaults to 1.
+	RenderPoolSize int
 	// LookupIP overrides DNS resolution used by the SSRF guard (for tests).
 	LookupIP func(ctx context.Context, network, host string) ([]net.IP, error)
 	Logger   *slog.Logger
@@ -146,9 +152,11 @@ func NewClientWithOptions(opts Options) *Client {
 	// when JS_RENDER=never; ensureChrome() gives a clear error if no browser
 	// binary is present. renderMode only controls the auto-fallback.
 	renderer := NewChromeRenderer(RendererOptions{
-		ChromeBin: opts.ChromeBin,
-		MaxBody:   opts.MaxBody,
-		Logger:    opts.Logger,
+		ChromeBin:  opts.ChromeBin,
+		MaxBody:    opts.MaxBody,
+		ProfileDir: opts.RenderProfileDir,
+		PoolSize:   opts.RenderPoolSize,
+		Logger:     opts.Logger,
 	})
 
 	return &Client{
@@ -209,6 +217,14 @@ func (c *Client) Fetch(ctx context.Context, rawURL string) (*Page, error) {
 	return c.FetchWithOptions(ctx, rawURL, FetchOptions{})
 }
 
+// Close releases renderer resources (pooled browser processes). It is safe to
+// call multiple times and on a client without a browser renderer.
+func (c *Client) Close() {
+	if cr, ok := c.renderer.(*chromeRenderer); ok {
+		cr.Close()
+	}
+}
+
 // FetchWithOptions fetches rawURL, optionally rendering it with a browser and
 // falling back to the renderer when auto-mode detects a bot block.
 func (c *Client) FetchWithOptions(ctx context.Context, rawURL string, fo FetchOptions) (*Page, error) {
@@ -242,12 +258,32 @@ func (c *Client) FetchWithOptions(ctx context.Context, rawURL string, fo FetchOp
 	if err == nil {
 		return page, nil
 	}
-	if c.renderMode == renderAuto && c.renderer != nil && isBlockable(err) {
-		c.logger.Warn("[request] fetch falling back to JS render",
-			"url", u.String(),
-			"error", err.Error(),
-		)
-		return c.render(ctx, u)
+	var se *StatusError
+	if errors.As(err, &se) {
+		// Classify the block so logs and agent-facing errors carry the block
+		// type instead of raw challenge HTML.
+		kind := classifyStatus(se.Status, se.Body)
+		if kind != BlockNone {
+			c.logger.Warn("[request] fetch block classified",
+				"url", u.String(),
+				"status", se.Status,
+				"block_kind", string(kind),
+			)
+		}
+		if c.renderMode == renderAuto && c.renderer != nil && isBlockable(err) {
+			c.logger.Warn("[request] fetch falling back to JS render",
+				"url", u.String(),
+				"error", err.Error(),
+			)
+			return c.render(ctx, u)
+		}
+		if kind != BlockNone {
+			detail := extractTitle([]byte(se.Body))
+			if detail == "" {
+				detail = strings.TrimSpace(se.Body)
+			}
+			return nil, &BlockError{Kind: kind, URL: se.URL, Detail: detail, RetryAfter: se.RetryAfter}
+		}
 	}
 	return nil, err
 }
@@ -361,15 +397,7 @@ func (c *Client) processResponse(resp *http.Response, reqID string, start time.T
 		}
 	}
 
-	title := ""
-	// crude <title> extraction before conversion
-	lower := strings.ToLower(string(body))
-	if i := strings.Index(lower, "<title>"); i >= 0 {
-		rest := body[i+len("<title>"):]
-		if j := strings.Index(strings.ToLower(string(rest)), "</title>"); j >= 0 {
-			title = strings.TrimSpace(string(rest[:j]))
-		}
-	}
+	title := extractTitle(body)
 
 	c.logger.Info("[response] fetch",
 		"request_id", reqID,
