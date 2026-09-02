@@ -258,6 +258,20 @@ func (c *Client) FetchWithOptions(ctx context.Context, rawURL string, fo FetchOp
 	if err == nil {
 		return page, nil
 	}
+	// A challenge served with HTTP 200 arrives as BlockError from the success
+	// path: it is blockable (auto-mode falls back to render) and reported
+	// structurally, but must never be retried as a transport error.
+	var be *BlockError
+	if errors.As(err, &be) {
+		if c.renderMode == renderAuto && c.renderer != nil {
+			c.logger.Warn("[request] fetch falling back to JS render",
+				"url", u.String(),
+				"error", err.Error(),
+			)
+			return c.render(ctx, u)
+		}
+		return nil, err
+	}
 	var se *StatusError
 	if errors.As(err, &se) {
 		// Classify the block so logs and agent-facing errors carry the block
@@ -399,6 +413,22 @@ func (c *Client) processResponse(resp *http.Response, reqID string, start time.T
 
 	title := extractTitle(body)
 
+	// Some WAFs serve their challenge page with HTTP 200; never hand it to the
+	// agent as if it were content (the render path already does this check).
+	if kind := classifyPage(title, body); kind != BlockNone {
+		c.logger.Warn("[response] fetch challenge with success status",
+			"request_id", reqID,
+			"url", resp.Request.URL.String(),
+			"status", resp.StatusCode,
+			"block_kind", string(kind),
+		)
+		return nil, &BlockError{
+			Kind:   kind,
+			URL:    resp.Request.URL.String(),
+			Detail: title,
+		}
+	}
+
 	c.logger.Info("[response] fetch",
 		"request_id", reqID,
 		"tool", "web_fetch",
@@ -415,6 +445,10 @@ func (c *Client) processResponse(resp *http.Response, reqID string, start time.T
 
 // shouldRetry reports whether a failed attempt is worth retrying.
 func shouldRetry(err error) bool {
+	var be *BlockError
+	if errors.As(err, &be) {
+		return false // challenge pages do not resolve by retrying
+	}
 	var se *StatusError
 	if errors.As(err, &se) {
 		switch se.Status {
@@ -429,6 +463,10 @@ func shouldRetry(err error) bool {
 // isBlockable reports whether an error looks like an antibot block, in which
 // case auto-mode falls back to JS rendering.
 func isBlockable(err error) bool {
+	var be *BlockError
+	if errors.As(err, &be) {
+		return true
+	}
 	var se *StatusError
 	if errors.As(err, &se) {
 		switch se.Status {

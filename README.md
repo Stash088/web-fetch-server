@@ -70,6 +70,9 @@ API_KEYS=key-for-user-a,key-for-user-b SEARXNG_URL=http://localhost:8888 go run 
 | `CHROME_BIN`     | *(auto)*               | Path to the Chrome/Chromium binary. Empty = auto-detect (`chromium`, `chromium-browser`, `google-chrome`, ...) |
 | `RENDER_PROFILE_DIR`| *(tmpdir)*          | Base directory for persistent render browser profiles. Cookies (`cf_clearance`, shop sessions) survive between renders and are wiped on every server start. |
 | `RENDER_POOL_SIZE`| `1`                   | Number of pooled render browsers; each gets its own profile so parallel renders never lock each other. |
+| `FETCH_CACHE_TTL`| `20m`                 | TTL cache for direct `web_fetch` results (`0` disables it). Rendered pages are keyed separately. |
+| `RENDER_CACHE_TTL`| `5m`                 | TTL cache for `render:true` fetches — shorter, because browser cookies/profiles drift over time. |
+| `SEARCH_CACHE_TTL`| `10m`                | TTL cache for `web_search` results (`0` disables it). |
 | `DEFAULT_MAX_LEN`| `8000`                 | Default `max_length` for `web_fetch`           |
 | `MAX_RESULTS`    | `10`                   | Default `max_results` for `web_search`           |
 | `BLOCK_PRIVATE_NETWORKS` | `true`          | SSRF protection: reject private/loopback ranges in `web_fetch` targets |
@@ -169,6 +172,27 @@ The renderer needs a Chrome/Chromium binary:
 With `JS_RENDER=auto`, `web_fetch` tries the plain HTTP path first and falls
 back to the browser only when it detects a bot block (403/429/498/5xx/TLS).
 Per-call `render: true` forces the browser regardless of the mode.
+
+### Content quality
+
+`web_fetch` optimizes what lands in the model's context:
+
+- **Article extraction** (default `extract: true`) — the main article content
+  is extracted with [go-readability](https://github.com/go-shiori/go-readability)
+  before HTML→Markdown conversion: menus, footers and cookie banners are
+  dropped. Non-article pages (docs, landing pages) fall back to full-page
+  conversion automatically. Responses carry `extracted: true` plus `metadata`
+  (title, description, published_time, ...) when extraction succeeded.
+  Pass `extract: false` to get the full page. Non-HTML bodies (PDF text) are
+  never extracted.
+- **`format: text`** returns real plain text (no tags), with line breaks on
+  block elements.
+- **Chunking is rune-based**: `total_chars` counts characters (not bytes), so
+  cyrillic text pages correctly via `start_index`; chunks snap to paragraph
+  boundaries when possible.
+- **Caching**: successful `web_search` / `web_fetch` results are cached by TTL
+  (see `FETCH_CACHE_TTL` / `RENDER_CACHE_TTL` / `SEARCH_CACHE_TTL`, `0` = off).
+  Cache hits carry `cached: true`. Errors and antibot blocks are never cached.
 
 ## Logging
 

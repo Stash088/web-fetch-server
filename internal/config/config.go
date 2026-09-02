@@ -35,6 +35,10 @@ type Config struct {
 	RenderProfileDir string
 	// RenderPoolSize is the number of pooled render browser processes.
 	RenderPoolSize int
+	// Cache TTLs for the MCP tools. 0 disables the corresponding cache.
+	FetchCacheTTL  time.Duration // direct HTTP fetches
+	RenderCacheTTL time.Duration // headless-browser renders (shorter: cookies drift)
+	SearchCacheTTL time.Duration // SearXNG search results
 	// BlockPrivateNetworks enables SSRF protection: rejects private, loopback
 	// and other unsafe address ranges in web_fetch targets.
 	BlockPrivateNetworks bool
@@ -68,6 +72,9 @@ func Load() Config {
 		ChromeBin:            os.Getenv("CHROME_BIN"),
 		RenderProfileDir:     os.Getenv("RENDER_PROFILE_DIR"),
 		RenderPoolSize:       getEnvInt("RENDER_POOL_SIZE", 1),
+		FetchCacheTTL:        getEnvDur("FETCH_CACHE_TTL", 20*time.Minute),
+		RenderCacheTTL:       getEnvDur("RENDER_CACHE_TTL", 5*time.Minute),
+		SearchCacheTTL:       getEnvDur("SEARCH_CACHE_TTL", 10*time.Minute),
 		BlockPrivateNetworks: getEnvBool("BLOCK_PRIVATE_NETWORKS", true),
 	}
 }

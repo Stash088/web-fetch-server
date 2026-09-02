@@ -46,6 +46,11 @@ services:
       - JS_RENDER=${JS_RENDER:-never}
       - JS_RENDER_TIMEOUT=${JS_RENDER_TIMEOUT:-30s}
       - CHROME_BIN=${CHROME_BIN:-}
+      - RENDER_PROFILE_DIR=${RENDER_PROFILE_DIR:-}
+      - RENDER_POOL_SIZE=${RENDER_POOL_SIZE:-1}
+      - FETCH_CACHE_TTL=${FETCH_CACHE_TTL:-20m}
+      - RENDER_CACHE_TTL=${RENDER_CACHE_TTL:-5m}
+      - SEARCH_CACHE_TTL=${SEARCH_CACHE_TTL:-10m}
     depends_on:
       searxng:
         condition: service_healthy

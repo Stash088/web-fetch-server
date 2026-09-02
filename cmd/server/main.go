@@ -15,6 +15,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/amir/web-fetch-server/internal/cache"
 	"github.com/amir/web-fetch-server/internal/config"
 	webmcp "github.com/amir/web-fetch-server/internal/mcp"
 )
@@ -29,7 +30,19 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: cfg.LogLevel}))
 	slog.SetDefault(logger)
 
-	server := webmcp.BuildWithLogger(cfg, logger)
+	// TTL caches for the MCP tools; nil cache = disabled (TTL 0 in config).
+	deps := webmcp.CacheDeps{}
+	if cfg.FetchCacheTTL > 0 {
+		deps.Fetch = cache.New(512, cfg.FetchCacheTTL)
+	}
+	if cfg.RenderCacheTTL > 0 {
+		deps.Render = cache.New(128, cfg.RenderCacheTTL)
+	}
+	if cfg.SearchCacheTTL > 0 {
+		deps.Search = cache.New(256, cfg.SearchCacheTTL)
+	}
+
+	server := webmcp.BuildWithLogger(cfg, logger, deps)
 	handler := mcp.NewStreamableHTTPHandler(func(*http.Request) *mcp.Server {
 		return server
 	}, nil)
