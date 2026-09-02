@@ -14,7 +14,10 @@ type Config struct {
 	APIKeys       []string // Bearer tokens accepted for MCP access; empty = open
 	SearxngURL    string
 	SearxngKey    string // optional SearXNG API key
-	MaxFetchBytes int64
+	// SearchCategories is the comma-separated SearXNG categories list sent
+	// with every web_search (SEARCH_CATEGORIES, default "general,it").
+	SearchCategories string
+	MaxFetchBytes    int64
 	// PDFMaxFetchBytes bounds body size for PDF responses (PDF_MAX_FETCH_BYTES);
 	// PDFs are parsed to text client-side so they get a higher cap.
 	PDFMaxFetchBytes int64
@@ -77,6 +80,7 @@ func Load() Config {
 		APIKeys:              loadAPIKeys(),
 		SearxngURL:           getEnv("SEARXNG_URL", "http://localhost:8888"),
 		SearxngKey:           os.Getenv("SEARXNG_KEY"),
+		SearchCategories:     getEnv("SEARCH_CATEGORIES", "general,it"),
 		MaxFetchBytes:        getEnvInt64("MAX_FETCH_BYTES", 2<<20),
 		PDFMaxFetchBytes:     getEnvInt64("PDF_MAX_FETCH_BYTES", 8<<20),
 		FetchTimeout:         getEnvDur("FETCH_TIMEOUT", 20*time.Second),

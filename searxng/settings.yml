@@ -14,12 +14,9 @@ search:
   formats:
     - html
     - json
-  # general = google cse web; it adds the keyless vertical APIs (stackoverflow,
-  # github, mdn, askubuntu, superuser, docker hub, ...) that survive datacenter
-  # egress IPs and give the reranker real engine consensus on tech queries.
-  default_categories:
-    - general
-    - it
+  # Note: category selection lives in the client (SEARCH_CATEGORIES on the
+  # web-fetch-server, default "general,it") — SearXNG has no server-side
+  # default_categories setting for the JSON API.
 
 # Engine set tuning. Engine reachability below was verified live from the
 # production egress IP (2026-09-02): most general-purpose engines hard- or

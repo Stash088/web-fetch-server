@@ -61,6 +61,7 @@ API_KEYS=key-for-user-a,key-for-user-b SEARXNG_URL=http://localhost:8888 go run 
 | `API_KEY`       | *(empty)*              | Legacy alias for a single key. Used only when `API_KEYS` is unset. |
 | `SEARXNG_URL`    | `http://localhost:8888`| Base URL of SearXNG                            |
 | `SEARXNG_KEY`    | *(empty)*              | Optional SearXNG API key (Bearer)             |
+| `SEARCH_CATEGORIES`| `general,it`         | SearXNG categories queried by `web_search`; `it` adds keyless verticals (stackoverflow, github, mdn, ...) for engine consensus on tech queries |
 | `MAX_FETCH_BYTES`| `2097152` (2 MiB)      | Max body size fetched from a page              |
 | `PDF_MAX_FETCH_BYTES`| `8388608` (8 MiB)   | Max body size for PDF responses (parsed to text client-side); PDFs cut by a smaller cap fail with an explicit `truncated` error |
 | `FETCH_TIMEOUT`  | `20s`                  | HTTP timeout for SearXNG and page fetches      |

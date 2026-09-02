@@ -15,10 +15,11 @@ import (
 )
 
 type Client struct {
-	baseURL string
-	apiKey  string
-	http    *http.Client
-	logger  *slog.Logger
+	baseURL    string
+	apiKey     string
+	categories string // comma-separated SearXNG categories, e.g. "general,it"
+	http       *http.Client
+	logger     *slog.Logger
 }
 
 type Result struct {
@@ -60,6 +61,14 @@ func newRequestID() string {
 	return hex.EncodeToString(b)
 }
 
+// WithCategories sets the SearXNG categories for every search request
+// (e.g. "general,it": general web plus the keyless IT vertical APIs that
+// survive datacenter egress IPs and feed engine consensus on tech queries).
+func (c *Client) WithCategories(cats string) *Client {
+	c.categories = cats
+	return c
+}
+
 func (c *Client) Search(ctx context.Context, query, language, timeRange string, maxResults int) ([]Result, error) {
 	u, err := url.Parse(c.baseURL + "/search")
 	if err != nil {
@@ -68,6 +77,9 @@ func (c *Client) Search(ctx context.Context, query, language, timeRange string, 
 	q := u.Query()
 	q.Set("q", query)
 	q.Set("format", "json")
+	if c.categories != "" {
+		q.Set("categories", c.categories)
+	}
 	if language != "" {
 		q.Set("language", language)
 	}

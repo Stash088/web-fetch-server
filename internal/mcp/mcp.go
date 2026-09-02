@@ -48,7 +48,8 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 		Version: "0.1.0",
 	}, nil)
 
-	searchClient := search.NewClientWithLogger(cfg.SearxngURL, cfg.SearxngKey, cfg.FetchTimeout, logger)
+	searchClient := search.NewClientWithLogger(cfg.SearxngURL, cfg.SearxngKey, cfg.FetchTimeout, logger).
+		WithCategories(cfg.SearchCategories)
 	fetchClient := fetch.NewClientWithOptions(fetch.Options{
 		Timeout:          cfg.FetchTimeout,
 		PDFTimeout:       cfg.PDFFetchTimeout,
