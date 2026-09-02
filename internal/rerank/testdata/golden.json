@@ -1,0 +1,12 @@
+[
+  {"query": "как настроить nginx как обратный прокси", "expected": ["nginx.org", "digitalocean.com"]},
+  {"query": "что такое 502 bad gateway и почему возникает", "expected": ["nginx.org"]},
+  {"query": "golang context cancellation best practices", "expected": ["go.dev", "pkg.go.dev"]},
+  {"query": "как посмотреть потребление памяти пода в kubernetes", "expected": ["kubernetes.io"]},
+  {"query": "postgres vacuum full или autovacuum в чем разница", "expected": ["postgresql.org"]},
+  {"query": "docker compose healthcheck depends_on condition", "expected": ["docs.docker.com"]},
+  {"query": "как включить json формат вывода в searxng", "expected": ["docs.searxng.org", "searxng"]},
+  {"query": "позиционирование absolute и relative в css разница", "expected": ["developer.mozilla.org"]},
+  {"query": "golang net/http client таймаут настройка", "expected": ["pkg.go.dev", "go.dev"]},
+  {"query": "git отменить последний коммит сохранив изменения", "expected": ["git-scm.com", "atlassian.com", "github.com"]}
+]

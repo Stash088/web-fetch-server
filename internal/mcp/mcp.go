@@ -12,6 +12,7 @@ import (
 	"github.com/amir/web-fetch-server/internal/config"
 	"github.com/amir/web-fetch-server/internal/content"
 	"github.com/amir/web-fetch-server/internal/fetch"
+	"github.com/amir/web-fetch-server/internal/rerank"
 	"github.com/amir/web-fetch-server/internal/search"
 )
 
@@ -56,6 +57,21 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 		Logger:           logger,
 	})
 
+	var reranker rerank.Reranker
+	switch cfg.RerankMode {
+	case "none":
+		reranker = rerank.NewNone()
+	case "semantic":
+		if cfg.RerankAPIKey == "" {
+			logger.Warn("RERANK=semantic but RERANK_API_KEY is empty — falling back to rrf")
+			reranker = rerank.NewRRF(logger)
+		} else {
+			reranker = rerank.NewSemantic(logger, rerank.NewRouterAIScoreFn(cfg.RerankAPIURL, cfg.RerankAPIKey, cfg.RerankModel, cfg.RerankTimeout))
+		}
+	default:
+		reranker = rerank.NewRRF(logger)
+	}
+
 	type searchArgs struct {
 		Query      string  `json:"query" jsonschema:"the search query"`
 		MaxResults *int    `json:"max_results,omitempty" jsonschema:"maximum number of results to return, default 10"`
@@ -68,7 +84,7 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 	}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "web_search",
-		Description: "Search the web via the SearXNG metasearch backend. Returns a list of results with title, url, snippet and engine.",
+		Description: "Search the web via the SearXNG metasearch backend. Returns a list of results with title, url, snippet, engine and rerank score.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchArgs) (*mcp.CallToolResult, searchOut, error) {
 		max := 0
 		if in.MaxResults != nil {
@@ -110,6 +126,7 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 		if err != nil {
 			return nil, searchOut{}, err
 		}
+		res = reranker.Rank(in.Query, res)
 		if deps.Search != nil && len(res) > 0 {
 			deps.Search.Set(cacheKey, res)
 		}

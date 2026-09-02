@@ -78,6 +78,30 @@ func TestParseKeys(t *testing.T) {
 	}
 }
 
+func TestLoadRerankMode(t *testing.T) {
+	tests := []struct {
+		rerank string
+		want   string
+	}{
+		{rerank: "", want: "rrf"},
+		{rerank: "rrf", want: "rrf"},
+		{rerank: "none", want: "none"},
+		{rerank: "NONE", want: "none"},
+		{rerank: " none ", want: "none"},
+		{rerank: "semantic", want: "semantic"},
+		{rerank: "SEMANTIC", want: "semantic"},
+		{rerank: "bogus", want: "rrf"},
+	}
+	for _, tt := range tests {
+		t.Run("RERANK="+tt.rerank, func(t *testing.T) {
+			t.Setenv("RERANK", tt.rerank)
+			if got := Load().RerankMode; got != tt.want {
+				t.Errorf("RerankMode = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadBrowserOptions(t *testing.T) {
 	t.Setenv("TLS_FINGERPRINT", "off")
 	t.Setenv("JS_RENDER", "auto")

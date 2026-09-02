@@ -73,6 +73,11 @@ API_KEYS=key-for-user-a,key-for-user-b SEARXNG_URL=http://localhost:8888 go run 
 | `FETCH_CACHE_TTL`| `20m`                 | TTL cache for direct `web_fetch` results (`0` disables it). Rendered pages are keyed separately. |
 | `RENDER_CACHE_TTL`| `5m`                 | TTL cache for `render:true` fetches — shorter, because browser cookies/profiles drift over time. |
 | `SEARCH_CACHE_TTL`| `10m`                | TTL cache for `web_search` results (`0` disables it). |
+| `RERANK`         | `rrf`                  | Re-ranking of `web_search` results: `rrf` (BM25 + engine consensus + RRF fusion), `semantic` (adds an external cross-encoder rerank-API vote, requires `RERANK_API_KEY`) or `none` (SearXNG order passthrough). |
+| `RERANK_API_URL` | `https://routerai.ru/api/v1` | Base URL of a Cohere-compatible rerank API (used by `RERANK=semantic`). |
+| `RERANK_API_KEY` | *(empty)*              | API key for the rerank service. Empty = `semantic` mode falls back to `rrf`. |
+| `RERANK_MODEL`   | `voyageai/rerank-2.5-lite` | Rerank model id sent to the API. |
+| `RERANK_TIMEOUT` | `3s`                   | Timeout for a single rerank API call; on timeout/error the order degrades to `rrf` (fail-open). |
 | `DEFAULT_MAX_LEN`| `8000`                 | Default `max_length` for `web_fetch`           |
 | `MAX_RESULTS`    | `10`                   | Default `max_results` for `web_search`           |
 | `BLOCK_PRIVATE_NETWORKS` | `true`          | SSRF protection: reject private/loopback ranges in `web_fetch` targets |
@@ -108,7 +113,58 @@ Then prompt: `use web-tools to search for the latest Go release notes`.
 - `language` *(optional)* — e.g. `en`, `ru`
 - `time_range` *(optional)* — `day`, `month`, `year`
 
-Returns: list of `{title, url, snippet, engine}`.
+Returns: list of `{title, url, snippet, engine, engines, score, reranked}`.
+`engines` is the list of SearXNG engines that returned the result; `score` and
+`reranked` are present when re-ranking is enabled (default).
+
+### Re-ranking (`RERANK`)
+
+By default `web_search` results are re-ranked in-process (pure stdlib, no
+external services):
+
+1. **BM25** over `title + snippet` — the corpus is the candidate set itself,
+   so IDF is computed on it; unicode tokenization, `k1=1.5`, `b=0.75`.
+2. **Engine consensus** — results returned by more engines rank higher.
+3. **RRF fusion** — the BM25 order and the engine-consensus order are fused
+   with reciprocal rank fusion (`1/(60 + rank)`, ranks from 1); ties keep the
+   original SearXNG order.
+
+Every result comes back with `score` (the fused RRF sum) and `reranked: true`.
+Results that match no query terms get no BM25 vote; a reranker failure never
+breaks the search (fail-open: original order is returned). Set `RERANK=none`
+to disable re-ranking and pass the SearXNG order through untouched.
+
+### Semantic re-ranking (`RERANK=semantic`)
+
+Adds a third vote: an external cross-encoder reranker (Cohere-compatible API,
+default: RouterAI `voyageai/rerank-2.5-lite`) scoring `query` against each
+`title + snippet`. This closes the gaps BM25 cannot see — synonyms, paraphrase
+and cross-lingual queries (RU query → EN pages). Exact identifiers (error
+strings, API names) still benefit from the BM25 vote, so both run together.
+
+- Cost: ~2.5K input tokens per uncached search ≈ 0.006₽ on RouterAI.
+- Latency: one API call (+200–500ms) on cache misses only; `RERANK_TIMEOUT`
+  bounds it, and a failure degrades the order to plain `rrf`.
+- Snippets are truncated to 1000 runes before being sent to the API.
+- Requires `RERANK_API_KEY`; without it the server logs a warning and falls
+  back to `rrf`.
+
+#### Measuring the gain (golden set)
+
+`internal/rerank/testdata/golden.json` holds ~10 queries with expected result
+domains (edit to taste — expected entries match the result host as a
+substring). Run the live measurement against a running SearXNG:
+
+```sh
+GOLDEN_LIVE=1 \
+SEARXNG_URL=http://localhost:8888 \
+RERANK_API_KEY=... \
+go test ./internal/rerank/ -run TestGoldenSetLive -v
+```
+
+It prints per-query ranks and a `SUMMARY` line per mode (`top3` hit rate and
+MRR) for `none` / `rrf` / `semantic`. Without `RERANK_API_KEY` the semantic
+row is skipped. The test is skipped entirely in normal `go test ./...` runs.
 
 ### `web_fetch`
 - `url` *(required)* — page to fetch

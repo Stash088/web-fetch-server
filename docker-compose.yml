@@ -51,6 +51,11 @@ services:
       - FETCH_CACHE_TTL=${FETCH_CACHE_TTL:-20m}
       - RENDER_CACHE_TTL=${RENDER_CACHE_TTL:-5m}
       - SEARCH_CACHE_TTL=${SEARCH_CACHE_TTL:-10m}
+      - RERANK=${RERANK:-rrf}
+      - RERANK_API_URL=${RERANK_API_URL:-https://routerai.ru/api/v1}
+      - RERANK_API_KEY=${RERANK_API_KEY:-}
+      - RERANK_MODEL=${RERANK_MODEL:-voyageai/rerank-2.5-lite}
+      - RERANK_TIMEOUT=${RERANK_TIMEOUT:-3s}
     depends_on:
       searxng:
         condition: service_healthy

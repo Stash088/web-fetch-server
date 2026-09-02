@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 )
@@ -58,6 +59,32 @@ func TestSearchRespectsMaxResults(t *testing.T) {
 	}
 	if len(res) != 2 {
 		t.Fatalf("got %d results, want 2", len(res))
+	}
+}
+
+func TestSearchParsesEngines(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"results":[
+			{"title":"T1","url":"https://a.com","content":"snippet one","engines":["google","bing"]},
+			{"title":"T2","url":"https://b.com","content":"snippet two","engines":["ddg"]}
+		]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", 5*time.Second)
+	res, err := c.Search(context.Background(), "golang", "", "", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if len(res) != 2 {
+		t.Fatalf("got %d results, want 2", len(res))
+	}
+	if want := []string{"google", "bing"}; !reflect.DeepEqual(res[0].Engines, want) {
+		t.Errorf("Engines[0] = %v, want %v", res[0].Engines, want)
+	}
+	if want := []string{"ddg"}; !reflect.DeepEqual(res[1].Engines, want) {
+		t.Errorf("Engines[1] = %v, want %v", res[1].Engines, want)
 	}
 }
 

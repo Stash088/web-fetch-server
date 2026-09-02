@@ -39,6 +39,17 @@ type Config struct {
 	FetchCacheTTL  time.Duration // direct HTTP fetches
 	RenderCacheTTL time.Duration // headless-browser renders (shorter: cookies drift)
 	SearchCacheTTL time.Duration // SearXNG search results
+	// RerankMode controls web_search result reranking: "rrf" (BM25 + engine
+	// consensus + RRF fusion, default), "semantic" (adds a cross-encoder
+	// rerank-API vote, requires RerankAPIKey) or "none" (SearXNG order
+	// passthrough).
+	RerankMode string
+	// External rerank API (Cohere-compatible, default RouterAI). Used when
+	// RerankMode == "semantic".
+	RerankAPIURL  string
+	RerankAPIKey  string
+	RerankModel   string
+	RerankTimeout time.Duration
 	// BlockPrivateNetworks enables SSRF protection: rejects private, loopback
 	// and other unsafe address ranges in web_fetch targets.
 	BlockPrivateNetworks bool
@@ -75,6 +86,11 @@ func Load() Config {
 		FetchCacheTTL:        getEnvDur("FETCH_CACHE_TTL", 20*time.Minute),
 		RenderCacheTTL:       getEnvDur("RENDER_CACHE_TTL", 5*time.Minute),
 		SearchCacheTTL:       getEnvDur("SEARCH_CACHE_TTL", 10*time.Minute),
+		RerankMode:           getRerankMode(),
+		RerankAPIURL:         getEnv("RERANK_API_URL", "https://routerai.ru/api/v1"),
+		RerankAPIKey:         os.Getenv("RERANK_API_KEY"),
+		RerankModel:          getEnv("RERANK_MODEL", "voyageai/rerank-2.5-lite"),
+		RerankTimeout:        getEnvDur("RERANK_TIMEOUT", 3*time.Second),
 		BlockPrivateNetworks: getEnvBool("BLOCK_PRIVATE_NETWORKS", true),
 	}
 }
@@ -116,6 +132,20 @@ func parseKeys(raw string) []string {
 		keys = append(keys, k)
 	}
 	return keys
+}
+
+// getRerankMode reads RERANK: "none" disables reranking, "semantic" enables
+// the external rerank-API vote, anything else (including unset or invalid
+// values) falls back to the default "rrf".
+func getRerankMode() string {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("RERANK"))) {
+	case "none":
+		return "none"
+	case "semantic":
+		return "semantic"
+	default:
+		return "rrf"
+	}
 }
 
 func getEnvInt(key string, def int) int {

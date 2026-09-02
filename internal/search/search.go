@@ -21,10 +21,13 @@ type Client struct {
 }
 
 type Result struct {
-	Title   string `json:"title"`
-	URL     string `json:"url"`
-	Snippet string `json:"content"`
-	Engine  string `json:"engine"`
+	Title    string   `json:"title"`
+	URL      string   `json:"url"`
+	Snippet  string   `json:"content"`
+	Engine   string   `json:"engine"`
+	Engines  []string `json:"engines,omitempty"`
+	Score    float64  `json:"score,omitempty"`
+	Reranked bool     `json:"reranked,omitempty"`
 }
 
 type response struct {
