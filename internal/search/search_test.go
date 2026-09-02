@@ -99,3 +99,24 @@ func TestSearchErrorStatus(t *testing.T) {
 		t.Fatal("expected error on 403")
 	}
 }
+
+func TestDedupResults(t *testing.T) {
+	in := []Result{
+		{Title: "a", URL: "https://docs.docker.com/compose/"},
+		{Title: "b", URL: "https://docs.docker.com/compose/?utm_source=bing&msockid=abc"},
+		{Title: "c", URL: "https://docs.docker.com/compose/#restart"},
+		{Title: "d", URL: "https://docs.Docker.com/compose"},
+		{Title: "e", URL: "https://docs.docker.com/engine/"},
+		{Title: "f", URL: "https://example.com/"},
+	}
+	got := dedupResults(in)
+	if len(got) != 3 {
+		t.Fatalf("got %d results after dedup, want 3: %+v", len(got), got)
+	}
+	want := []string{"https://docs.docker.com/compose/", "https://docs.docker.com/engine/", "https://example.com/"}
+	for i, w := range want {
+		if got[i].URL != w {
+			t.Errorf("URL[%d] = %q, want %q", i, got[i].URL, w)
+		}
+	}
+}

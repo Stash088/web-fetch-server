@@ -1,9 +1,12 @@
 package fetch
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"html"
 	"net/http"
+	"regexp"
 	"strings"
 )
 
@@ -137,12 +140,47 @@ func classifyPage(title string, body []byte) BlockKind {
 	if containsAny(lowerBody, captchaBodyMarkers) && len(body) <= maxChallengeBodySize {
 		return BlockCaptcha
 	}
-	// Block walls are only classified on small pages: a support article
-	// quoting "you've been blocked" inside real content must not be dropped.
-	if containsAny(lowerBody, blockWallBodyMarkers) && len(body) <= maxChallengeBodySize {
+	// Block walls are identified by their markers, but the 16KB small-page
+	// cap is too naive: Reddit's denial page is ~190KB of CSS with a couple
+	// of visible sentences. A wall is a small *visible* page — measured on
+	// the text left after stripping scripts, styles and tags — so a support
+	// article quoting "you've been blocked" (lots of visible text) never
+	// trips it, and neither does a footer widget on a content page.
+	if containsAny(lowerBody, blockWallBodyMarkers) && isShortWallPage(body) {
 		return BlockWall
 	}
 	return BlockNone
+}
+
+// wallMaxVisibleText bounds the visible-text length below which a page
+// carrying a block-wall marker is a denial page rather than content.
+const wallMaxVisibleText = 4 << 10
+
+var (
+	// Go's RE2 has no backreferences, so one compiled regex per stripped tag.
+	hiddenTagRes = func() []*regexp.Regexp {
+		var out []*regexp.Regexp
+		for _, tag := range []string{"script", "style", "noscript", "svg", "head"} {
+			out = append(out, regexp.MustCompile(`(?is)<`+tag+`\b[^>]*>.*?</`+tag+`>`))
+		}
+		return out
+	}()
+	tagRe = regexp.MustCompile(`<[^>]*>`)
+)
+
+// isShortWallPage reports whether the page's visible text (HTML minus
+// scripts/styles/tags) is small enough to be a block wall.
+func isShortWallPage(body []byte) bool {
+	if len(body) <= maxChallengeBodySize {
+		return true
+	}
+	visible := body
+	for _, re := range hiddenTagRes {
+		visible = re.ReplaceAll(visible, nil)
+	}
+	visible = tagRe.ReplaceAll(visible, nil)
+	visible = []byte(html.UnescapeString(string(visible)))
+	return len(bytes.TrimSpace(visible)) <= wallMaxVisibleText
 }
 
 // classifyStatus maps an HTTP status code plus response body to a block kind.

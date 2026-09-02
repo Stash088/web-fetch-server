@@ -14,20 +14,27 @@ search:
   formats:
     - html
     - json
+  # general = google cse web; it adds the keyless vertical APIs (stackoverflow,
+  # github, mdn, askubuntu, superuser, docker hub, ...) that survive datacenter
+  # egress IPs and give the reranker real engine consensus on tech queries.
+  default_categories:
+    - general
+    - it
 
-# Engine set tuning. The default set (use_default_settings) already has
-# google/duckduckgo/bing/mojeek/wikipedia on; listing them here documents
-# the intended set and guards against upstream defaults flipping them off.
+# Engine set tuning. Engine reachability below was verified live from the
+# production egress IP (2026-09-02): most general-purpose engines hard- or
+# soft-block datacenter IPs, while keyless vertical APIs stay open.
 # Engine diversity matters: the server's RRF rerank fuses per-engine votes,
 # so a single healthy engine degrades reranking to near-deterministic BM25.
-#   - google: works keyless from datacenter IPs (only engine observed alive
-#     on the production VM)
-#   - bing: usually tolerates datacenter IPs; verify after deploy
-#   - mojeek: independent index, no bot wall, keyless
-#   - wikipedia: language-aware (follows the query language), always reliable
-#   - duckduckgo: often bot-walled from datacenter IPs; kept enabled, but
-#     absence of its results in responses is expected and fine
-# Disabled (noisy/unusable on a keyless private instance):
+#   - google cse: works keyless via API — the only healthy general engine
+#   - IT verticals (default-enabled, category "it"): stackoverflow, github,
+#     mdn, microsoft learn, askubuntu, superuser, docker hub — verified alive
+# Disabled: soft-blocked or garbage from datacenter IPs — they waste the
+# outgoing request timeout and poison results when they do answer:
+#   - bing: serves random unrelated pages (zhihu/seznam/Google logins) on
+#     every query — worse than no results
+#   - duckduckgo: CAPTCHA; mojeek: access denied; qwant: CAPTCHA;
+#     yandex: timeout
 #   - brave: rate-limits without an API key (suspended_time=180 warnings)
 #   - wikidata: blocked from this IP (403 from SPARQL endpoint)
 #   - startpage: blocks this IP (404)
@@ -36,13 +43,15 @@ engines:
   - name: google
     disabled: false
   - name: bing
-    disabled: false
-  - name: mojeek
-    disabled: false
-  - name: wikipedia
-    disabled: false
+    disabled: true
   - name: duckduckgo
-    disabled: false
+    disabled: true
+  - name: mojeek
+    disabled: true
+  - name: qwant
+    disabled: true
+  - name: yandex
+    disabled: true
   - name: brave
     disabled: true
   - name: wikidata

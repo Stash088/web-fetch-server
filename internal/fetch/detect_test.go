@@ -87,6 +87,11 @@ func TestClassifyPage(t *testing.T) {
 			want:  BlockNone,
 		},
 		{
+			name: "reddit-style wall with 190KB of CSS and tiny visible text",
+			body: `<html><head><style>` + strings.Repeat(`.theme-light{--rem360:22.5rem;}`, 5000) + `</style></head><body><div>You've been blocked by network security.</div></body></html>`,
+			want: BlockWall,
+		},
+		{
 			name: "cloudflare challenge wins over block wall text",
 			body: `<html><body>You've been blocked.<script>window._cf_chl_opt={"chl":1}</script></body></html>`,
 			want: BlockChallengeCloudflare,

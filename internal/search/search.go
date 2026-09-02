@@ -10,6 +10,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strings"
 	"time"
 )
 
@@ -120,10 +121,20 @@ func (c *Client) Search(ctx context.Context, query, language, timeRange string, 
 		return nil, fmt.Errorf("decode searxng response: %w", err)
 	}
 
-	if maxResults <= 0 || maxResults > len(parsed.Results) {
-		maxResults = len(parsed.Results)
+	deduped := dedupResults(parsed.Results)
+	c.logger.Info("[response] searxng",
+		"request_id", reqID,
+		"tool", "web_search",
+		"status", resp.StatusCode,
+		"latency_ms", time.Since(start).Milliseconds(),
+		"total_results", len(parsed.Results),
+		"deduped_results", len(deduped),
+	)
+
+	if maxResults <= 0 || maxResults > len(deduped) {
+		maxResults = len(deduped)
 	}
-	out := parsed.Results[:maxResults]
+	out := deduped[:maxResults]
 
 	c.logger.Info("[response] searxng",
 		"request_id", reqID,
@@ -136,6 +147,61 @@ func (c *Client) Search(ctx context.Context, query, language, timeRange string, 
 	)
 
 	return out, nil
+}
+
+// trackingParams are URL query parameters that identify the same page behind
+// campaign/session variants (bing adds msockid, google utm_*).
+var trackingParams = map[string]struct{}{
+	"utm_source": {}, "utm_medium": {}, "utm_campaign": {}, "utm_term": {},
+	"utm_content": {}, "gclid": {}, "fbclid": {}, "msclkid": {}, "msockid": {},
+	"yclid": {}, "igshid": {}, "mc_cid": {}, "mc_eid": {}, "ref": {}, "ref_src": {},
+}
+
+// normalizeResultURL collapses URL variants that point to the same page:
+// lower-cased scheme/host, stripped fragment and tracking parameters, and a
+// single trailing slash. Used only as a dedup key, never returned.
+func normalizeResultURL(raw string) string {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return raw
+	}
+	u.Scheme = strings.ToLower(u.Scheme)
+	u.Host = strings.ToLower(u.Host)
+	u.Fragment = ""
+	if u.RawQuery != "" {
+		q := u.Query()
+		for p := range q {
+			if _, tracked := trackingParams[strings.ToLower(p)]; tracked {
+				q.Del(p)
+			}
+		}
+		u.RawQuery = q.Encode()
+	}
+	u.Path = strings.TrimSuffix(u.Path, "/")
+	if u.Path == "" {
+		u.Path = "/"
+	}
+	return u.String()
+}
+
+// dedupResults drops URLs that normalize to an already-seen page, keeping the
+// first occurrence (SearXNG order). Duplicate hits inflate single-engine
+// rankings and fake engine consensus in the reranker.
+func dedupResults(in []Result) []Result {
+	if len(in) == 0 {
+		return in
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := in[:0:0]
+	for _, r := range in {
+		key := normalizeResultURL(r.URL)
+		if _, dup := seen[key]; dup {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, r)
+	}
+	return out
 }
 
 // firstSnippet returns a compact preview of the first result for logging.
