@@ -36,7 +36,7 @@ services:
     environment:
       - PORT=8080
       - SEARXNG_URL=http://searxng:8080
-      - SEARCH_CATEGORIES=${SEARCH_CATEGORIES:-general,it}
+      - SEARCH_CATEGORIES=${SEARCH_CATEGORIES:-general}
       # API_KEYS is a comma-separated list (one key per user); API_KEY remains
       # a legacy alias for a single key. If neither is set the server logs a
       # warning and the /mcp endpoint stays open.

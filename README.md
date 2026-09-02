@@ -61,7 +61,7 @@ API_KEYS=key-for-user-a,key-for-user-b SEARXNG_URL=http://localhost:8888 go run 
 | `API_KEY`       | *(empty)*              | Legacy alias for a single key. Used only when `API_KEYS` is unset. |
 | `SEARXNG_URL`    | `http://localhost:8888`| Base URL of SearXNG                            |
 | `SEARXNG_KEY`    | *(empty)*              | Optional SearXNG API key (Bearer)             |
-| `SEARCH_CATEGORIES`| `general,it`         | SearXNG categories queried by `web_search`; `it` adds keyless verticals (stackoverflow, github, mdn, ...) for engine consensus on tech queries |
+| `SEARCH_CATEGORIES`| `general`            | Default SearXNG categories for `web_search`; the tool accepts a per-call `categories` override (e.g. `"general,it"` adds keyless verticals — stackoverflow, github, mdn — useful on tech queries, noisy on general ones) |
 | `MAX_FETCH_BYTES`| `2097152` (2 MiB)      | Max body size fetched from a page              |
 | `PDF_MAX_FETCH_BYTES`| `8388608` (8 MiB)   | Max body size for PDF responses (parsed to text client-side); PDFs cut by a smaller cap fail with an explicit `truncated` error |
 | `FETCH_TIMEOUT`  | `20s`                  | HTTP timeout for SearXNG and page fetches      |
@@ -115,10 +115,18 @@ Then prompt: `use web-tools to search for the latest Go release notes`.
 - `max_results` *(default 10)* — max results
 - `language` *(optional)* — e.g. `en`, `ru`
 - `time_range` *(optional)* — `day`, `month`, `year`
+- `categories` *(optional)* — SearXNG categories override, e.g. `"general,it"`
+  to include the keyless IT verticals (stackoverflow, github, mdn) on tech
+  queries. Default comes from `SEARCH_CATEGORIES` (`general`): verticals are
+  opt-in because they flood general/lifestyle queries with noise.
 
 Returns: list of `{title, url, snippet, engine, engines, score, reranked}`.
 `engines` is the list of SearXNG engines that returned the result; `score` and
-`reranked` are present when re-ranking is enabled (default).
+`reranked` are present when re-ranking is enabled (default). `engines_status`
+lists engines that could not answer (`google cse: too many requests` — CSE
+daily quota, `duckduckgo: CAPTCHA`, ...): an empty result list with a
+non-empty `engines_status` means the web is unreachable right now, not that
+nothing exists.
 
 ### Re-ranking (`RERANK`)
 

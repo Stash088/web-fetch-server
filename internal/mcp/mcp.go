@@ -86,14 +86,16 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 		MaxResults *int    `json:"max_results,omitempty" jsonschema:"maximum number of results to return, default 10"`
 		Language   *string `json:"language,omitempty" jsonschema:"optional language code, e.g. en or ru"`
 		TimeRange  *string `json:"time_range,omitempty" jsonschema:"optional time range filter: day, month or year"`
+		Categories *string `json:"categories,omitempty" jsonschema:"optional SearXNG categories override, e.g. \"general,it\" to add IT verticals (stackoverflow, github, mdn) — useful for tech queries, noisy on general ones"`
 	}
 	type searchOut struct {
-		Results []search.Result `json:"results"`
-		Cached  bool            `json:"cached,omitempty"`
+		Results       []search.Result `json:"results"`
+		EnginesStatus []string        `json:"engines_status,omitempty"` // engines that failed (quota, CAPTCHA, blocks)
+		Cached        bool            `json:"cached,omitempty"`
 	}
 	mcp.AddTool(server, &mcp.Tool{
 		Name:        "web_search",
-		Description: "Search the web via the SearXNG metasearch backend. Returns a list of results with title, url, snippet, engine and rerank score.",
+		Description: "Search the web via the SearXNG metasearch backend. Returns a list of results with title, url, snippet, engine and rerank score. engines_status lists engines that could not answer (quota, CAPTCHA) — an empty result with engines_status means the web is unreachable right now, not that nothing exists.",
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in searchArgs) (*mcp.CallToolResult, searchOut, error) {
 		max := 0
 		if in.MaxResults != nil {
@@ -102,12 +104,15 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 		if max <= 0 {
 			max = cfg.MaxResults
 		}
-		lang, tr := "", ""
+		lang, tr, cats := "", "", ""
 		if in.Language != nil {
 			lang = *in.Language
 		}
 		if in.TimeRange != nil {
 			tr = *in.TimeRange
+		}
+		if in.Categories != nil {
+			cats = *in.Categories
 		}
 		logger.Info("[request] tool web_search",
 			"tool", "web_search",
@@ -115,31 +120,32 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 			"max_results", max,
 			"language", lang,
 			"time_range", tr,
+			"categories", cats,
 		)
 
-		cacheKey := fmt.Sprintf("%s|%s|%s|%d", in.Query, lang, tr, max)
+		cacheKey := fmt.Sprintf("%s|%s|%s|%s|%d", in.Query, cats, lang, tr, max)
 		if deps.Search != nil {
 			if v, ok := deps.Search.Get(cacheKey); ok {
-				if res, ok := v.([]search.Result); ok && len(res) > 0 {
+				if e, ok := v.(*searchCacheEntry); ok && len(e.Results) > 0 {
 					logger.Info("[response] tool web_search (cached)",
 						"tool", "web_search",
 						"query", in.Query,
-						"results", len(res),
+						"results", len(e.Results),
 					)
-					return nil, searchOut{Results: res, Cached: true}, nil
+					return nil, searchOut{Results: e.Results, EnginesStatus: e.EnginesStatus, Cached: true}, nil
 				}
 			}
 		}
 
-		res, err := searchClient.Search(ctx, in.Query, lang, tr, max)
+		resp, err := searchClient.SearchIn(ctx, cats, in.Query, lang, tr, max)
 		if err != nil {
 			return nil, searchOut{}, err
 		}
-		res = reranker.Rank(in.Query, res)
+		res := reranker.Rank(in.Query, resp.Results)
 		if deps.Search != nil && len(res) > 0 {
-			deps.Search.Set(cacheKey, res)
+			deps.Search.Set(cacheKey, &searchCacheEntry{Results: res, EnginesStatus: resp.UnresponsiveEngines})
 		}
-		return nil, searchOut{Results: res}, nil
+		return nil, searchOut{Results: res, EnginesStatus: resp.UnresponsiveEngines}, nil
 	})
 
 	type fetchArgs struct {
@@ -242,6 +248,13 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 	})
 
 	return server
+}
+
+// searchCacheEntry is what the web_search TTL cache stores: results plus the
+// engine statuses (quota/CAPTCHA reasons) so cached misses stay explainable.
+type searchCacheEntry struct {
+	Results       []search.Result
+	EnginesStatus []string
 }
 
 // fetchCacheEntry is what gets stored in the fetch/render TTL caches: the

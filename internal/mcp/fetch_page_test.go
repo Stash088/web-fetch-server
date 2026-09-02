@@ -138,3 +138,39 @@ func TestOversizedExtractionFlagged(t *testing.T) {
 		t.Errorf("metadata extraction_fallback = %v, want oversized_extract", meta["extraction_fallback"])
 	}
 }
+
+func TestSearchCategoriesArgAndEnginesStatus(t *testing.T) {
+	var gotCats string
+	searchSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCats = r.URL.Query().Get("categories")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"results":[{"title":"T","url":"https://a.example","content":"s","engine":"google cse"}],
+		"unresponsive_engines":[["google cse","too many requests"]]}`))
+	}))
+	defer searchSrv.Close()
+
+	cfg := config.Load()
+	cfg.SearxngURL = searchSrv.URL
+	session, closeFn := newCacheTestServer(t, cfg, CacheDeps{})
+	defer closeFn()
+
+	// Default (cfg.SearchCategories) is sent as-is.
+	out, isErr := callTool(t, session, "web_search", map[string]any{"query": "пуэр"})
+	if isErr {
+		t.Fatal("web_search returned tool error")
+	}
+	if gotCats != cfg.SearchCategories {
+		t.Errorf("default categories = %q, want %q", gotCats, cfg.SearchCategories)
+	}
+	if st, _ := out["engines_status"].([]any); len(st) != 1 || st[0] != "google cse: too many requests" {
+		t.Errorf("engines_status = %v, want google cse quota reason", out["engines_status"])
+	}
+
+	// Per-call override reaches SearXNG.
+	if _, isErr := callTool(t, session, "web_search", map[string]any{"query": "пуэр", "categories": "general,it"}); isErr {
+		t.Fatal("web_search with categories returned tool error")
+	}
+	if gotCats != "general,it" {
+		t.Errorf("per-call categories = %q, want general,it", gotCats)
+	}
+}

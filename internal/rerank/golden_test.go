@@ -66,11 +66,12 @@ func TestGoldenSetLive(t *testing.T) {
 	}
 
 	for _, c := range cases {
-		res, err := client.Search(context.Background(), c.Query, "", "", 10)
+		resp, err := client.Search(context.Background(), c.Query, "", "", 10)
 		if err != nil {
 			t.Errorf("search %q: %v", c.Query, err)
 			continue
 		}
+		res := resp.Results
 		for name, rk := range rerankers {
 			got := rk.Rank(c.Query, res)
 			s := sum[name]

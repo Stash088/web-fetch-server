@@ -29,15 +29,16 @@ func TestSearchParsesResults(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "", 5*time.Second)
-	res, err := c.Search(context.Background(), "golang", "en", "", 10)
+	resp, err := c.Search(context.Background(), "golang", "en", "", 10)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if len(res) != 2 {
-		t.Fatalf("got %d results, want 2", len(res))
+	if len(resp.Results) != 2 {
+		t.Fatalf("got %d results, want 2", len(resp.Results))
 	}
-	if res[0].Title != "T1" || res[0].URL != "https://a.com" || res[0].Snippet != "snippet one" {
-		t.Errorf("unexpected first result: %+v", res[0])
+	r := resp.Results[0]
+	if r.Title != "T1" || r.URL != "https://a.com" || r.Snippet != "snippet one" {
+		t.Errorf("unexpected first result: %+v", r)
 	}
 }
 
@@ -53,12 +54,12 @@ func TestSearchRespectsMaxResults(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "", 5*time.Second)
-	res, err := c.Search(context.Background(), "q", "", "", 2)
+	resp, err := c.Search(context.Background(), "q", "", "", 2)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if len(res) != 2 {
-		t.Fatalf("got %d results, want 2", len(res))
+	if len(resp.Results) != 2 {
+		t.Fatalf("got %d results, want 2", len(resp.Results))
 	}
 }
 
@@ -73,18 +74,70 @@ func TestSearchParsesEngines(t *testing.T) {
 	defer srv.Close()
 
 	c := NewClient(srv.URL, "", 5*time.Second)
-	res, err := c.Search(context.Background(), "golang", "", "", 10)
+	resp, err := c.Search(context.Background(), "golang", "", "", 10)
 	if err != nil {
 		t.Fatalf("search: %v", err)
 	}
-	if len(res) != 2 {
-		t.Fatalf("got %d results, want 2", len(res))
+	if len(resp.Results) != 2 {
+		t.Fatalf("got %d results, want 2", len(resp.Results))
 	}
-	if want := []string{"google", "bing"}; !reflect.DeepEqual(res[0].Engines, want) {
-		t.Errorf("Engines[0] = %v, want %v", res[0].Engines, want)
+	if want := []string{"google", "bing"}; !reflect.DeepEqual(resp.Results[0].Engines, want) {
+		t.Errorf("Engines[0] = %v, want %v", resp.Results[0].Engines, want)
 	}
-	if want := []string{"ddg"}; !reflect.DeepEqual(res[1].Engines, want) {
-		t.Errorf("Engines[1] = %v, want %v", res[1].Engines, want)
+	if want := []string{"ddg"}; !reflect.DeepEqual(resp.Results[1].Engines, want) {
+		t.Errorf("Engines[1] = %v, want %v", resp.Results[1].Engines, want)
+	}
+}
+
+func TestSearchUnresponsiveEngines(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"results":[
+			{"title":"T1","url":"https://a.com","content":"x","engine":"google cse"}
+		],
+		"unresponsive_engines":[["google cse","too many requests"],["duckduckgo","CAPTCHA"]]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", 5*time.Second)
+	resp, err := c.Search(context.Background(), "q", "", "", 10)
+	if err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	want := []string{"google cse: too many requests", "duckduckgo: CAPTCHA"}
+	if !reflect.DeepEqual(resp.UnresponsiveEngines, want) {
+		t.Errorf("UnresponsiveEngines = %v, want %v", resp.UnresponsiveEngines, want)
+	}
+}
+
+func TestSearchInCategoriesParam(t *testing.T) {
+	var gotCats string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCats = r.URL.Query().Get("categories")
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"results":[]}`))
+	}))
+	defer srv.Close()
+
+	c := NewClient(srv.URL, "", 5*time.Second).WithCategories("general")
+	if _, err := c.Search(context.Background(), "q", "", "", 10); err != nil {
+		t.Fatalf("search: %v", err)
+	}
+	if gotCats != "general" {
+		t.Errorf("default categories = %q, want general", gotCats)
+	}
+	if _, err := c.SearchIn(context.Background(), "general,it", "q", "", "", 10); err != nil {
+		t.Fatalf("search-in: %v", err)
+	}
+	if gotCats != "general,it" {
+		t.Errorf("per-call categories = %q, want general,it", gotCats)
+	}
+	// The per-call override must not leak into the client default.
+	if _, err := c.Search(context.Background(), "q", "", "", 10); err != nil {
+		t.Fatalf("search after override: %v", err)
+	}
+	if gotCats != "general" {
+		t.Errorf("categories after override = %q, want general (override leaked)", gotCats)
 	}
 }
 

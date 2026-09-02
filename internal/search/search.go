@@ -32,8 +32,17 @@ type Result struct {
 	Reranked bool     `json:"reranked,omitempty"`
 }
 
-type response struct {
-	Results []Result `json:"results"`
+// Response is the processed SearXNG answer: deduplicated results plus the
+// status of engines that failed to answer (quota, CAPTCHA, blocks) so the
+// caller can tell "nothing found" from "the web is unreachable".
+type Response struct {
+	Results             []Result
+	UnresponsiveEngines []string // "engine: reason"
+}
+
+type rawResponse struct {
+	Results       []Result    `json:"results"`
+	Unresponsive  [][]string  `json:"unresponsive_engines"`
 }
 
 func NewClient(baseURL, apiKey string, timeout time.Duration) *Client {
@@ -69,7 +78,14 @@ func (c *Client) WithCategories(cats string) *Client {
 	return c
 }
 
-func (c *Client) Search(ctx context.Context, query, language, timeRange string, maxResults int) ([]Result, error) {
+func (c *Client) Search(ctx context.Context, query, language, timeRange string, maxResults int) (*Response, error) {
+	return c.SearchIn(ctx, "", query, language, timeRange, maxResults)
+}
+
+// SearchIn searches the given comma-separated SearXNG categories (e.g.
+// "general,it" for tech queries where the IT vertical APIs are useful);
+// empty categories falls back to the client default.
+func (c *Client) SearchIn(ctx context.Context, categories, query, language, timeRange string, maxResults int) (*Response, error) {
 	u, err := url.Parse(c.baseURL + "/search")
 	if err != nil {
 		return nil, fmt.Errorf("parse searxng url: %w", err)
@@ -77,7 +93,9 @@ func (c *Client) Search(ctx context.Context, query, language, timeRange string, 
 	q := u.Query()
 	q.Set("q", query)
 	q.Set("format", "json")
-	if c.categories != "" {
+	if cats := categories; cats != "" {
+		q.Set("categories", cats)
+	} else if c.categories != "" {
 		q.Set("categories", c.categories)
 	}
 	if language != "" {
@@ -127,7 +145,7 @@ func (c *Client) Search(ctx context.Context, query, language, timeRange string, 
 		return nil, fmt.Errorf("searxng status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var parsed response
+	var parsed rawResponse
 	if err := json.NewDecoder(resp.Body).Decode(&parsed); err != nil {
 		c.logger.Error("[response] searxng decode failed", "request_id", reqID, "error", err.Error())
 		return nil, fmt.Errorf("decode searxng response: %w", err)
@@ -141,12 +159,16 @@ func (c *Client) Search(ctx context.Context, query, language, timeRange string, 
 		"latency_ms", time.Since(start).Milliseconds(),
 		"total_results", len(parsed.Results),
 		"deduped_results", len(deduped),
+		"unresponsive", len(parsed.Unresponsive),
 	)
 
-	if maxResults <= 0 || maxResults > len(deduped) {
-		maxResults = len(deduped)
+	out := &Response{
+		Results:             deduped,
+		UnresponsiveEngines: flattenUnresponsive(parsed.Unresponsive),
 	}
-	out := deduped[:maxResults]
+	if maxResults > 0 && maxResults < len(out.Results) {
+		out.Results = out.Results[:maxResults]
+	}
 
 	c.logger.Info("[response] searxng",
 		"request_id", reqID,
@@ -154,11 +176,31 @@ func (c *Client) Search(ctx context.Context, query, language, timeRange string, 
 		"status", resp.StatusCode,
 		"latency_ms", time.Since(start).Milliseconds(),
 		"total_results", len(parsed.Results),
-		"returned_results", len(out),
-		"first_result", firstSnippet(out),
+		"returned_results", len(out.Results),
+		"first_result", firstSnippet(out.Results),
 	)
 
 	return out, nil
+}
+
+// flattenUnresponsive turns SearXNG's [[engine, reason], ...] into
+// ["engine: reason", ...] for compact reporting to the agent.
+func flattenUnresponsive(pairs [][]string) []string {
+	if len(pairs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(pairs))
+	for _, p := range pairs {
+		if len(p) == 0 {
+			continue
+		}
+		if len(p) == 1 {
+			out = append(out, p[0])
+			continue
+		}
+		out = append(out, p[0]+": "+strings.Join(p[1:], ", "))
+	}
+	return out
 }
 
 // trackingParams are URL query parameters that identify the same page behind
