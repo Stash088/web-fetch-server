@@ -41,6 +41,7 @@ services:
       # warning and the /mcp endpoint stays open.
       - API_KEYS=${API_KEYS:-${API_KEY:-}}
       - MAX_FETCH_BYTES=2097152
+      - PDF_MAX_FETCH_BYTES=${PDF_MAX_FETCH_BYTES:-8388608}
       - FETCH_TIMEOUT=${FETCH_TIMEOUT:-20s}
       - PDF_FETCH_TIMEOUT=${PDF_FETCH_TIMEOUT:-60s}
       - LOG_LEVEL=${LOG_LEVEL:-info}

@@ -62,6 +62,7 @@ API_KEYS=key-for-user-a,key-for-user-b SEARXNG_URL=http://localhost:8888 go run 
 | `SEARXNG_URL`    | `http://localhost:8888`| Base URL of SearXNG                            |
 | `SEARXNG_KEY`    | *(empty)*              | Optional SearXNG API key (Bearer)             |
 | `MAX_FETCH_BYTES`| `2097152` (2 MiB)      | Max body size fetched from a page              |
+| `PDF_MAX_FETCH_BYTES`| `8388608` (8 MiB)   | Max body size for PDF responses (parsed to text client-side); PDFs cut by a smaller cap fail with an explicit `truncated` error |
 | `FETCH_TIMEOUT`  | `20s`                  | HTTP timeout for SearXNG and page fetches      |
 | `PDF_FETCH_TIMEOUT`| `60s`                | Timeout for PDF fetches (by `.pdf`/`/pdf/` URL hint, or a retry when a PDF body outlived `FETCH_TIMEOUT`). Used only when larger than `FETCH_TIMEOUT`. |
 | `USER_AGENT`     | Chrome 126 UA          | User-Agent sent to target sites. Defaults to a real Chrome UA to reduce antibot blocking. |

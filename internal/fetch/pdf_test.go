@@ -84,21 +84,31 @@ func TestFetchPDFContentParsed(t *testing.T) {
 	}
 }
 
+// dripPDF writes a valid PDF (~chunks*64KB) in 64KB chunks with a pause
+// between them, simulating a slow heavy download.
+func dripPDF(w http.ResponseWriter, chunks int) {
+	text := strings.Repeat("The quick brown fox jumps over the lazy dog. ", chunks*64<<10/45)
+	pdfBytes := buildTestPDF(text)
+	w.Header().Set("Content-Type", "application/pdf")
+	flusher := w.(http.Flusher)
+	const step = 64 << 10
+	for i := 0; i < len(pdfBytes); i += step {
+		end := i + step
+		if end > len(pdfBytes) {
+			end = len(pdfBytes)
+		}
+		w.Write(pdfBytes[i:end])
+		flusher.Flush()
+		time.Sleep(60 * time.Millisecond)
+	}
+}
+
 func TestPDFRetryAfterBodyDeadline(t *testing.T) {
 	var attempts int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
-		w.Header().Set("Content-Type", "application/pdf")
-		flusher := w.(http.Flusher)
-		// Drip a ~1.5MB PDF slowly: way past the plain timeout, well inside
-		// the PDF budget.
-		chunk := bytes.Repeat([]byte("A"), 64<<10)
-		w.Write([]byte("%PDF-1.4\n"))
-		flusher.Flush()
-		for i := 0; i < 24; i++ {
-			time.Sleep(60 * time.Millisecond)
-			w.Write(chunk)
-		}
+		// ~1.5MB PDF: way past the plain timeout, well inside the PDF budget.
+		dripPDF(w, 24)
 	}))
 	defer srv.Close()
 
@@ -122,15 +132,7 @@ func TestPDFURLHintAvoidsFirstTimeout(t *testing.T) {
 	var attempts int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		attempts++
-		w.Header().Set("Content-Type", "application/pdf")
-		flusher := w.(http.Flusher)
-		chunk := bytes.Repeat([]byte("A"), 64<<10)
-		w.Write([]byte("%PDF-1.4\n"))
-		flusher.Flush()
-		for i := 0; i < 20; i++ {
-			time.Sleep(60 * time.Millisecond)
-			w.Write(chunk)
-		}
+		dripPDF(w, 20)
 	}))
 	defer srv.Close()
 
@@ -143,6 +145,50 @@ func TestPDFURLHintAvoidsFirstTimeout(t *testing.T) {
 	}
 	if attempts != 1 {
 		t.Errorf("attempts = %d, want 1 (no wasted attempt on the plain timeout)", attempts)
+	}
+}
+
+func TestPDFBodyLimitAndHonestParseError(t *testing.T) {
+	// A valid PDF larger than the plain page cap but inside the PDF cap is
+	// fully read and parsed.
+	bigText := strings.Repeat("The quick brown fox jumps over the lazy dog. ", 34000) // ~1.4MB
+	pdfBytes := buildTestPDF(bigText)
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Write(pdfBytes)
+	}))
+	defer srv.Close()
+
+	c := NewClientWithOptions(Options{
+		Timeout: 5 * time.Second, MaxBody: 1 << 20, PDFMaxBody: 4 << 20,
+		UserAgent: "test-agent/1.0", TLSFingerprint: "off",
+	})
+	page, err := c.Fetch(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("expected PDF within pdf body cap to parse: %v", err)
+	}
+	if !strings.Contains(string(page.Body), "quick brown fox") {
+		t.Error("expected extracted text from the big PDF")
+	}
+
+	// A body cut off by the PDF cap yields an honest error, never raw bytes.
+	srv2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/pdf")
+		w.Write(bytes.Repeat(pdfBytes, 3)) // ~4.2MB > PDFMaxBody
+	}))
+	defer srv2.Close()
+
+	c2 := NewClientWithOptions(Options{
+		Timeout: 5 * time.Second, MaxBody: 1 << 20, PDFMaxBody: 2 << 20,
+		UserAgent: "test-agent/1.0", TLSFingerprint: "off",
+	})
+	_, err = c2.Fetch(context.Background(), srv2.URL)
+	if err == nil {
+		t.Fatal("expected error for a truncated PDF body")
+	}
+	if !strings.Contains(err.Error(), "pdf parse failed") || !strings.Contains(err.Error(), "truncated") {
+		t.Errorf("error should name pdf parse failure and truncation, got: %v", err)
 	}
 }
 

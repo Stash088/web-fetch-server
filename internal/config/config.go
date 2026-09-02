@@ -15,14 +15,17 @@ type Config struct {
 	SearxngURL    string
 	SearxngKey    string // optional SearXNG API key
 	MaxFetchBytes int64
-	FetchTimeout  time.Duration
+	// PDFMaxFetchBytes bounds body size for PDF responses (PDF_MAX_FETCH_BYTES);
+	// PDFs are parsed to text client-side so they get a higher cap.
+	PDFMaxFetchBytes int64
+	FetchTimeout     time.Duration
 	// PDFFetchTimeout bounds fetches of PDF documents (PDF_FETCH_TIMEOUT);
 	// only used when larger than FetchTimeout.
 	PDFFetchTimeout time.Duration
 	UserAgent       string
-	DefaultMaxLen int
-	MaxResults    int
-	LogLevel      slog.Level
+	DefaultMaxLen   int
+	MaxResults      int
+	LogLevel        slog.Level
 	// TLSFingerprint controls the TLS ClientHello fingerprint sent by the
 	// fetch client: "chrome" (uTLS, mimics Chrome) or "off" (stdlib TLS).
 	TLSFingerprint string
@@ -75,6 +78,7 @@ func Load() Config {
 		SearxngURL:           getEnv("SEARXNG_URL", "http://localhost:8888"),
 		SearxngKey:           os.Getenv("SEARXNG_KEY"),
 		MaxFetchBytes:        getEnvInt64("MAX_FETCH_BYTES", 2<<20),
+		PDFMaxFetchBytes:     getEnvInt64("PDF_MAX_FETCH_BYTES", 8<<20),
 		FetchTimeout:         getEnvDur("FETCH_TIMEOUT", 20*time.Second),
 		PDFFetchTimeout:      getEnvDur("PDF_FETCH_TIMEOUT", 60*time.Second),
 		UserAgent:            getEnv("USER_AGENT", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),

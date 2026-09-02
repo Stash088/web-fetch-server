@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -15,6 +16,11 @@ import (
 	"github.com/amir/web-fetch-server/internal/rerank"
 	"github.com/amir/web-fetch-server/internal/search"
 )
+
+// oversizedExtractRunes is the extracted-text size above which an "article"
+// is more likely a portal page dump (infobox-heavy wikis) than curated
+// content; such responses are flagged in metadata.
+const oversizedExtractRunes = 100_000
 
 // CacheDeps carries optional TTL caches shared by the MCP tools. A nil cache
 // disables caching for that kind. Fetch and Render are separate so browser
@@ -47,6 +53,7 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 		Timeout:          cfg.FetchTimeout,
 		PDFTimeout:       cfg.PDFFetchTimeout,
 		MaxBody:          cfg.MaxFetchBytes,
+		PDFMaxBody:       cfg.PDFMaxFetchBytes,
 		UserAgent:        cfg.UserAgent,
 		BlockPrivate:     cfg.BlockPrivateNetworks,
 		TLSFingerprint:   cfg.TLSFingerprint,
@@ -293,6 +300,18 @@ func convertPage(logger *slog.Logger, page *fetch.Page, format string, extract b
 		text = content.ToText(body)
 	} else {
 		text = content.ToMarkdown(body)
+	}
+
+	// An extraction that "succeeded" with a huge result is not a curated
+	// article either: infobox-heavy portals (ru-wiki «Москва», 500K+ chars)
+	// sail past the minExtractRunes threshold and return a raw page dump.
+	// Flag it so the model can tell.
+	if extracted && utf8.RuneCountInString(text) > oversizedExtractRunes {
+		metadata["extraction_fallback"] = "oversized_extract"
+		logger.Warn("[response] web_fetch oversized extraction",
+			"url", page.URL,
+			"text_chars", utf8.RuneCountInString(text),
+		)
 	}
 
 	return &fetchCacheEntry{

@@ -108,3 +108,33 @@ func TestExtractionFallbackFlagged(t *testing.T) {
 		t.Error("article page must not carry extraction_fallback metadata")
 	}
 }
+
+func TestOversizedExtractionFlagged(t *testing.T) {
+	// An infobox-heavy portal that readability "successfully" extracts as a
+	// 100K+ rune dump: still extracted, but flagged so the model knows it is
+	// not a curated article.
+	paras := strings.Repeat(
+		`<p>Секция таблицы с данными и параметрами региона, населением, площадью и прочими характеристиками.</p>`, 1800)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html")
+		w.Write([]byte("<html><head><title>Portal</title></head><body><article><h1>Портал</h1>" + paras + "</article></body></html>"))
+	}))
+	defer srv.Close()
+
+	cfg := config.Load()
+	cfg.BlockPrivateNetworks = false
+	session, closeFn := newCacheTestServer(t, cfg, CacheDeps{})
+	defer closeFn()
+
+	out, isErr := callTool(t, session, "web_fetch", map[string]any{"url": srv.URL, "max_length": 200})
+	if isErr {
+		t.Fatal("oversized fetch returned tool error")
+	}
+	if extracted, _ := out["extracted"].(bool); !extracted {
+		t.Errorf("extracted = false, want true (readability keeps this page)")
+	}
+	meta, _ := out["metadata"].(map[string]any)
+	if v, _ := meta["extraction_fallback"].(string); v != "oversized_extract" {
+		t.Errorf("metadata extraction_fallback = %v, want oversized_extract", meta["extraction_fallback"])
+	}
+}

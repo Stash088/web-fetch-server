@@ -49,6 +49,10 @@ type Options struct {
 	// Only used when larger than Timeout; PDFs are large and parse client-side
 	// (PDF_FETCH_TIMEOUT).
 	PDFTimeout time.Duration
+	// PDFMaxBody bounds the body size for PDF responses (PDF_MAX_FETCH_BYTES).
+	// PDFs are parsed client-side into (much smaller) text, so they get a
+	// higher cap than plain HTML pages (MaxBody).
+	PDFMaxBody int64
 	// TLSFingerprint selects the TLS ClientHello fingerprint: "chrome" (uTLS)
 	// or "off" (stdlib TLS). Empty defaults to "chrome".
 	TLSFingerprint string
@@ -73,6 +77,7 @@ type Client struct {
 	http          *http.Client
 	pdfHTTP       *http.Client // longer Timeout for PDF bodies; nil when unset
 	maxBody       int64
+	pdfMaxBody    int64
 	ua            string
 	timeout       time.Duration
 	pdfTimeout    time.Duration
@@ -103,6 +108,9 @@ func NewClientWithOptions(opts Options) *Client {
 	}
 	if opts.MaxBody <= 0 {
 		opts.MaxBody = 2 << 20
+	}
+	if opts.PDFMaxBody <= opts.MaxBody {
+		opts.PDFMaxBody = opts.MaxBody
 	}
 	ua := opts.UserAgent
 	if ua == "" {
@@ -160,9 +168,9 @@ func NewClientWithOptions(opts Options) *Client {
 	pdfTimeout := opts.PDFTimeout
 	if pdfTimeout > opts.Timeout {
 		pdfHC = &http.Client{
-			Transport: tr,
-			Timeout:   pdfTimeout,
-			Jar:       jar,
+			Transport:     tr,
+			Timeout:       pdfTimeout,
+			Jar:           jar,
 			CheckRedirect: hc.CheckRedirect,
 		}
 	}
@@ -183,6 +191,7 @@ func NewClientWithOptions(opts Options) *Client {
 		http:          hc,
 		pdfHTTP:       pdfHC,
 		maxBody:       opts.MaxBody,
+		pdfMaxBody:    opts.PDFMaxBody,
 		ua:            ua,
 		timeout:       opts.Timeout,
 		pdfTimeout:    pdfTimeout,
@@ -418,7 +427,10 @@ func (c *Client) doFetch(ctx context.Context, hc *http.Client, u *url.URL) (*Pag
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+		// Sniff a larger prefix of the error page: block-wall markers (e.g.
+		// Reddit's "blocked by network security" at ~190KB) sit deep in
+		// CSS-heavy denial pages.
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 256<<10))
 		c.logger.Warn("[response] fetch non-200",
 			"request_id", reqID,
 			"status", resp.StatusCode,
@@ -438,25 +450,46 @@ func (c *Client) doFetch(ctx context.Context, hc *http.Client, u *url.URL) (*Pag
 // processResponse validates and converts a successful HTTP response into a Page.
 func (c *Client) processResponse(resp *http.Response, reqID string, start time.Time) (*Page, error) {
 	mediaType := mediaType(resp.Header.Get("Content-Type"))
-	body, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBody))
+	// PDF documents are parsed into (much smaller) text client-side, so they
+	// get a higher body cap than plain pages.
+	limit := c.maxBody
+	if looksLikePDF(resp.Request.URL) {
+		limit = c.pdfMaxBody
+	}
+	body, err := io.ReadAll(io.LimitReader(resp.Body, limit))
 	if err != nil {
 		c.logger.Error("[response] fetch read failed", "request_id", reqID, "error", err.Error())
 		// Carrying the content type lets the caller decide on a PDF-budget
 		// retry without re-fetching blind.
 		return nil, &bodyReadError{contentType: mediaType, err: err}
 	}
+	// PDFs discovered by content-type/magic (no URL hint) hit the plain page
+	// cap mid-body: extend the read up to the PDF cap before parsing.
+	if c.pdfMaxBody > c.maxBody && limit == c.maxBody && len(body) >= int(c.maxBody) && isPDF(mediaType, body) {
+		rest, rerr := io.ReadAll(io.LimitReader(resp.Body, c.pdfMaxBody-c.maxBody))
+		if rerr != nil {
+			c.logger.Error("[response] fetch pdf read failed", "request_id", reqID, "error", rerr.Error())
+			return nil, &bodyReadError{contentType: mediaType, err: rerr}
+		}
+		body = append(body, rest...)
+		limit = c.pdfMaxBody
+	}
 
 	// Parse PDF bodies into plain text when requested. This runs before the
 	// binary-media rejection: application/pdf is handled, not discarded (the
-	// magic-byte sniff also catches mislabeled PDF responses).
+	// magic-byte sniff also catches mislabeled PDF responses). A parse failure
+	// is a hard error — raw PDF bytes are never handed to the model.
 	if isPDF(mediaType, body) {
 		text, perr := parsePDF(resp.Request.URL.String(), body)
-		if perr == nil {
-			body = text
-			mediaType = "text/plain"
-		} else {
+		if perr != nil {
+			if len(body) >= int(limit) {
+				perr = fmt.Errorf("%w (body truncated at %d bytes — raise PDF_MAX_FETCH_BYTES)", perr, limit)
+			}
 			c.logger.Warn("[response] fetch pdf parse failed", "request_id", reqID, "error", perr.Error())
+			return nil, fmt.Errorf("fetch %s: pdf parse failed: %w", resp.Request.URL.String(), perr)
 		}
+		body = text
+		mediaType = "text/plain"
 	}
 
 	// Reject binary media payloads early so the model never receives junk.

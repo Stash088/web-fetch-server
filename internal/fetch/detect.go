@@ -3,6 +3,7 @@ package fetch
 import (
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
 )
 
@@ -146,14 +147,19 @@ func classifyPage(title string, body []byte) BlockKind {
 
 // classifyStatus maps an HTTP status code plus response body to a block kind.
 // The body always wins: a 429 that carries a CAPTCHA page is reported as
-// captcha (more specific), a plain 429/498 as rate_limited, and a plain 403
-// stays unclassified (not every 403 is an antibot block).
+// captcha (more specific), a plain 429/498 as rate_limited. A 403 whose body
+// carries block-wall markers is reported as block_wall regardless of the
+// 16KB cap that guards 200-OK pages — denial pages are commonly larger than
+// that (Reddit's runs ~190KB with the marker at ~189KB).
 func classifyStatus(status int, body string) BlockKind {
 	if kind := classifyPage("", []byte(body)); kind != BlockNone {
 		return kind
 	}
 	if status == 429 || status == 498 {
 		return BlockRateLimited
+	}
+	if status == http.StatusForbidden && containsAny(strings.ToLower(body), blockWallBodyMarkers) {
+		return BlockWall
 	}
 	return BlockNone
 }

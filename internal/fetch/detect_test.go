@@ -41,7 +41,7 @@ func TestClassifyPage(t *testing.T) {
 			want: BlockChallengeCloudflare,
 		},
 		{
-			name: "bare captcha page",
+			name:  "bare captcha page",
 			title: "",
 			body:  `<html><body><form action="/captcha"><div class="g-recaptcha" data-sitekey="6Lc"></div></form></body></html>`,
 			want:  BlockCaptcha,
@@ -112,6 +112,12 @@ func TestClassifyStatus(t *testing.T) {
 		{"plain 498", 498, "token invalid", BlockRateLimited},
 		{"plain 403 is not classified", 403, "forbidden", BlockNone},
 		{"403 with cloudflare body", 403, `<script>window.__cf_chl_opt={}</script>`, BlockChallengeCloudflare},
+		{
+			"403 reddit-style wall, marker deep in a large body",
+			403,
+			`<html><head><style>` + strings.Repeat(`.theme-light{--rem360:22.5rem;}`, 4000) + `</style></head><body>You've been blocked by network security.</body></html>`,
+			BlockWall,
+		},
 		{"429 carrying captcha page", 429, `<div class="g-recaptcha" data-sitekey="x"></div>`, BlockCaptcha},
 		{"500 plain", 500, "internal error", BlockNone},
 	}
