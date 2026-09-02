@@ -9,11 +9,11 @@ import (
 )
 
 type Config struct {
-	Port          string
-	MCPPath       string
-	APIKeys       []string // Bearer tokens accepted for MCP access; empty = open
-	SearxngURL    string
-	SearxngKey    string // optional SearXNG API key
+	Port       string
+	MCPPath    string
+	APIKeys    []string // Bearer tokens accepted for MCP access; empty = open
+	SearxngURL string
+	SearxngKey string // optional SearXNG API key
 	// SearchCategories is the default comma-separated SearXNG categories list
 	// sent with every web_search (SEARCH_CATEGORIES). "general" only: the IT
 	// verticals (stackoverflow, github, mdn, ...) are opt-in per call via the

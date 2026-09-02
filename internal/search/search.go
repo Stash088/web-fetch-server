@@ -41,8 +41,8 @@ type Response struct {
 }
 
 type rawResponse struct {
-	Results       []Result    `json:"results"`
-	Unresponsive  [][]string  `json:"unresponsive_engines"`
+	Results      []Result   `json:"results"`
+	Unresponsive [][]string `json:"unresponsive_engines"`
 }
 
 func NewClient(baseURL, apiKey string, timeout time.Duration) *Client {
