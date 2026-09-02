@@ -63,6 +63,7 @@ API_KEYS=key-for-user-a,key-for-user-b SEARXNG_URL=http://localhost:8888 go run 
 | `SEARXNG_KEY`    | *(empty)*              | Optional SearXNG API key (Bearer)             |
 | `MAX_FETCH_BYTES`| `2097152` (2 MiB)      | Max body size fetched from a page              |
 | `FETCH_TIMEOUT`  | `20s`                  | HTTP timeout for SearXNG and page fetches      |
+| `PDF_FETCH_TIMEOUT`| `60s`                | Timeout for PDF fetches (by `.pdf`/`/pdf/` URL hint, or a retry when a PDF body outlived `FETCH_TIMEOUT`). Used only when larger than `FETCH_TIMEOUT`. |
 | `USER_AGENT`     | Chrome 126 UA          | User-Agent sent to target sites. Defaults to a real Chrome UA to reduce antibot blocking. |
 | `TLS_FINGERPRINT`| `chrome`               | TLS ClientHello fingerprint: `chrome` (uTLS, mimics Chrome — bypasses JA3-based TLS blocks) or `off` (stdlib TLS) |
 | `JS_RENDER`      | `never`                | JS rendering via headless browser: `never` (off), `auto` (fallback when a bot block is detected), `always` (always render). Requires Chromium, see below. |
@@ -198,8 +199,10 @@ through documents larger than `max_length`.
    lang/timezone/viewport personas hide the automation surface.
 4. **Structured block reporting** — when a page still turns out to be an antibot
    block (Cloudflare challenge, JS check, CAPTCHA, rate limit), the agent gets
-   a clear `blocked (challenge_cloudflare|challenge_js|captcha|rate_limited)`
-   status instead of challenge HTML disguised as content.
+   a clear `blocked (challenge_cloudflare|challenge_js|captcha|rate_limited|block_wall)`
+   status instead of challenge HTML disguised as content. `block_wall` covers
+   200-OK denial notices ("You've been blocked by network security",
+   "Pardon our interruption") that offer no challenge to solve.
 
 ### When things still get blocked
 
@@ -209,6 +212,8 @@ through documents larger than `max_length`.
 | TLS handshake timeout          | JA3 TLS fingerprint | keep `TLS_FINGERPRINT=chrome` (default)    |
 | HTTP 403 + JS challenge, or JS-only content | needs a real browser | `render: true` in `web_fetch`, or `JS_RENDER=auto` |
 | `blocked (captcha)` status     | reCAPTCHA/Turnstile | cannot be solved automatically; fetch from a different source |
+| `blocked (block_wall)` status  | outright denial (200-OK) | nothing to solve; fetch from a different source |
+| Heavy PDF times out (`read body`) | large PDF on a slow host | raise `PDF_FETCH_TIMEOUT` (default 60s) |
 
 ### Enabling JS rendering
 

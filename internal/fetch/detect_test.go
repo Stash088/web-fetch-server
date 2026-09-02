@@ -70,6 +70,27 @@ func TestClassifyPage(t *testing.T) {
 			body:  `<html><body><div class="cf-turnstile" data-sitekey="0x1"></div><script src="https://challenges.cloudflare.com/turnstile/v0/api.js"></script></body></html>`,
 			want:  BlockCaptcha,
 		},
+		{
+			name: "reddit-style block wall with 200 status",
+			body: `<html><body><div>You've been blocked by network security. <a href="/">Back to home</a></div></body></html>`,
+			want: BlockWall,
+		},
+		{
+			name: "pardon our interruption wall",
+			body: `<html><body><h1>Pardon Our Interruption</h1><p>As you were browsing, something about your browser made us think you were a bot.</p></body></html>`,
+			want: BlockWall,
+		},
+		{
+			name:  "block message quoted inside a large article is content",
+			title: "How to appeal a ban",
+			body:  `<html><body>` + strings.Repeat(`<p>If you've been blocked on Discord, you can appeal the decision.</p>`, 2000) + `</body></html>`,
+			want:  BlockNone,
+		},
+		{
+			name: "cloudflare challenge wins over block wall text",
+			body: `<html><body>You've been blocked.<script>window._cf_chl_opt={"chl":1}</script></body></html>`,
+			want: BlockChallengeCloudflare,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

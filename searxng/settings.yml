@@ -15,13 +15,34 @@ search:
     - html
     - json
 
-# Disable engines that are noisy/unusable on a keyless private instance:
+# Engine set tuning. The default set (use_default_settings) already has
+# google/duckduckgo/bing/mojeek/wikipedia on; listing them here documents
+# the intended set and guards against upstream defaults flipping them off.
+# Engine diversity matters: the server's RRF rerank fuses per-engine votes,
+# so a single healthy engine degrades reranking to near-deterministic BM25.
+#   - google: works keyless from datacenter IPs (only engine observed alive
+#     on the production VM)
+#   - bing: usually tolerates datacenter IPs; verify after deploy
+#   - mojeek: independent index, no bot wall, keyless
+#   - wikipedia: language-aware (follows the query language), always reliable
+#   - duckduckgo: often bot-walled from datacenter IPs; kept enabled, but
+#     absence of its results in responses is expected and fine
+# Disabled (noisy/unusable on a keyless private instance):
 #   - brave: rate-limits without an API key (suspended_time=180 warnings)
 #   - wikidata: blocked from this IP (403 from SPARQL endpoint)
 #   - startpage: blocks this IP (404)
 #   - ahmia, torch: fail to load in this image
-#   - google cse, duckduckgo: keep enabled for results
 engines:
+  - name: google
+    disabled: false
+  - name: bing
+    disabled: false
+  - name: mojeek
+    disabled: false
+  - name: wikipedia
+    disabled: false
+  - name: duckduckgo
+    disabled: false
   - name: brave
     disabled: true
   - name: wikidata

@@ -16,7 +16,10 @@ type Config struct {
 	SearxngKey    string // optional SearXNG API key
 	MaxFetchBytes int64
 	FetchTimeout  time.Duration
-	UserAgent     string
+	// PDFFetchTimeout bounds fetches of PDF documents (PDF_FETCH_TIMEOUT);
+	// only used when larger than FetchTimeout.
+	PDFFetchTimeout time.Duration
+	UserAgent       string
 	DefaultMaxLen int
 	MaxResults    int
 	LogLevel      slog.Level
@@ -73,6 +76,7 @@ func Load() Config {
 		SearxngKey:           os.Getenv("SEARXNG_KEY"),
 		MaxFetchBytes:        getEnvInt64("MAX_FETCH_BYTES", 2<<20),
 		FetchTimeout:         getEnvDur("FETCH_TIMEOUT", 20*time.Second),
+		PDFFetchTimeout:      getEnvDur("PDF_FETCH_TIMEOUT", 60*time.Second),
 		UserAgent:            getEnv("USER_AGENT", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"),
 		DefaultMaxLen:        getEnvInt("DEFAULT_MAX_LEN", 8000),
 		MaxResults:           getEnvInt("MAX_RESULTS", 10),

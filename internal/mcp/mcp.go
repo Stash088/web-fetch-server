@@ -45,6 +45,7 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 	searchClient := search.NewClientWithLogger(cfg.SearxngURL, cfg.SearxngKey, cfg.FetchTimeout, logger)
 	fetchClient := fetch.NewClientWithOptions(fetch.Options{
 		Timeout:          cfg.FetchTimeout,
+		PDFTimeout:       cfg.PDFFetchTimeout,
 		MaxBody:          cfg.MaxFetchBytes,
 		UserAgent:        cfg.UserAgent,
 		BlockPrivate:     cfg.BlockPrivateNetworks,
@@ -189,7 +190,7 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 			if err != nil {
 				return nil, fetchOut{}, err
 			}
-			e := convertPage(page, format, extract)
+			e := convertPage(logger, page, format, extract)
 			if fetchCacheFor(deps, render) != nil && e.Text != "" {
 				fetchCacheFor(deps, render).Set(fetchCacheKey(in.URL, render, format, extract), e)
 			}
@@ -213,6 +214,9 @@ func BuildWithLogger(cfg config.Config, logger *slog.Logger, deps CacheDeps) *mc
 		}
 
 		chunk, total := content.Chunk(entry.Text, startIndex, maxLen)
+		if startIndex > 0 && startIndex >= total {
+			return nil, fetchOut{}, fmt.Errorf("start_index %d is beyond the end of the content (%d chars total)", startIndex, total)
+		}
 		out := fetchOut{
 			Title:      entry.Title,
 			URL:        entry.URL,
@@ -259,8 +263,9 @@ func fetchCacheKey(rawURL string, render bool, format string, extract bool) stri
 // convertPage turns a fetched page into the requested format, optionally via
 // readability extraction (HTML only — PDFs and other non-HTML bodies are
 // already text). Falls back to full-page conversion when extraction fails or
-// yields too little text.
-func convertPage(page *fetch.Page, format string, extract bool) *fetchCacheEntry {
+// yields too little text; the fallback is flagged in metadata so the model
+// can tell a curated article from a raw page dump.
+func convertPage(logger *slog.Logger, page *fetch.Page, format string, extract bool) *fetchCacheEntry {
 	title := page.Title
 	extracted := false
 	metadata := map[string]string{}
@@ -274,6 +279,12 @@ func convertPage(page *fetch.Page, format string, extract bool) *fetchCacheEntry
 			if t := meta["title"]; t != "" {
 				title = t
 			}
+		} else {
+			metadata["extraction_fallback"] = "full_page"
+			logger.Warn("[response] web_fetch readability fallback",
+				"url", page.URL,
+				"body_bytes", len(page.Body),
+			)
 		}
 	}
 

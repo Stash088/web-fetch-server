@@ -24,6 +24,11 @@ const (
 	// BlockCaptcha means the page demands a CAPTCHA solution (reCAPTCHA,
 	// Cloudflare Turnstile, hCaptcha) which cannot be solved automatically.
 	BlockCaptcha BlockKind = "captcha"
+	// BlockWall is an outright block notice ("You've been blocked by network
+	// security", "Pardon our interruption") served with HTTP 200 and carrying
+	// no challenge platform: there is nothing to solve, the client is simply
+	// denied.
+	BlockWall BlockKind = "block_wall"
 )
 
 // BlockError reports an antibot block in a structured, agent-readable way
@@ -89,6 +94,18 @@ var captchaBodyMarkers = []string{
 	"cf-turnstile",
 }
 
+// blockWallBodyMarkers are fragments of outright block notices (HTTP 200
+// pages that deny the client without offering any challenge to solve, e.g.
+// Reddit's "You've been blocked by network security" wall).
+var blockWallBodyMarkers = []string{
+	"blocked by network security",
+	"you've been blocked",
+	"access to this page has been denied",
+	"pardon our interruption",
+	"your request has been blocked",
+	"unusual traffic from your computer network",
+}
+
 // maxChallengeBodySize bounds the body size below which a CAPTCHA marker is
 // treated as a full-page challenge rather than a widget embedded inside
 // normal content (login forms on real pages are usually much larger).
@@ -97,8 +114,9 @@ const maxChallengeBodySize = 16 << 10
 // classifyPage inspects a fetched page (title + HTML body) for antibot
 // challenge markers and returns the detected block kind. When title is empty
 // it is extracted from the body. Cloudflare markers win over generic
-// challenge titles; CAPTCHA markers only classify bare/small pages so a
-// footer widget on a content page is not a false positive.
+// challenge titles; CAPTCHA and block-wall markers only classify bare/small
+// pages so a footer widget on a content page or a support article quoting a
+// block message is not a false positive.
 func classifyPage(title string, body []byte) BlockKind {
 	if title == "" {
 		title = extractTitle(body)
@@ -117,6 +135,11 @@ func classifyPage(title string, body []byte) BlockKind {
 	}
 	if containsAny(lowerBody, captchaBodyMarkers) && len(body) <= maxChallengeBodySize {
 		return BlockCaptcha
+	}
+	// Block walls are only classified on small pages: a support article
+	// quoting "you've been blocked" inside real content must not be dropped.
+	if containsAny(lowerBody, blockWallBodyMarkers) && len(body) <= maxChallengeBodySize {
+		return BlockWall
 	}
 	return BlockNone
 }

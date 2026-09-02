@@ -44,6 +44,11 @@ type Options struct {
 	UserAgent    string
 	MaxRedirects int
 	BlockPrivate bool
+	// PDFTimeout bounds fetches that are known to be PDF documents (by URL
+	// hint, or by a retry after the plain timeout died reading a PDF body).
+	// Only used when larger than Timeout; PDFs are large and parse client-side
+	// (PDF_FETCH_TIMEOUT).
+	PDFTimeout time.Duration
 	// TLSFingerprint selects the TLS ClientHello fingerprint: "chrome" (uTLS)
 	// or "off" (stdlib TLS). Empty defaults to "chrome".
 	TLSFingerprint string
@@ -66,9 +71,11 @@ type Options struct {
 
 type Client struct {
 	http          *http.Client
+	pdfHTTP       *http.Client // longer Timeout for PDF bodies; nil when unset
 	maxBody       int64
 	ua            string
 	timeout       time.Duration
+	pdfTimeout    time.Duration
 	guard         security.NetworkGuard
 	renderMode    string
 	renderer      Renderer
@@ -146,6 +153,19 @@ func NewClientWithOptions(opts Options) *Client {
 			return nil
 		},
 	}
+	// A dedicated client with a longer budget for PDF documents: they are
+	// heavy (hundreds of KB..MB) and read fully into memory before parsing.
+	// Only built when the PDF timeout actually exceeds the plain one.
+	var pdfHC *http.Client
+	pdfTimeout := opts.PDFTimeout
+	if pdfTimeout > opts.Timeout {
+		pdfHC = &http.Client{
+			Transport: tr,
+			Timeout:   pdfTimeout,
+			Jar:       jar,
+			CheckRedirect: hc.CheckRedirect,
+		}
+	}
 	guard := security.NetworkGuard{BlockPrivateNetworks: opts.BlockPrivate, LookupIP: opts.LookupIP}
 
 	// The renderer is always created so that a per-call render=true works even
@@ -161,9 +181,11 @@ func NewClientWithOptions(opts Options) *Client {
 
 	return &Client{
 		http:          hc,
+		pdfHTTP:       pdfHC,
 		maxBody:       opts.MaxBody,
 		ua:            ua,
 		timeout:       opts.Timeout,
+		pdfTimeout:    pdfTimeout,
 		guard:         guard,
 		renderMode:    renderMode,
 		renderer:      renderer,
@@ -191,6 +213,18 @@ type Page struct {
 	MediaType string
 	IsMedia   bool
 }
+
+// bodyReadError reports that the response headers arrived but reading the body
+// did not finish in time (typically a heavy PDF on a slow host). The content
+// type travels with the error so a longer PDF-budget retry can be decided
+// without re-fetching blind.
+type bodyReadError struct {
+	contentType string
+	err         error
+}
+
+func (e *bodyReadError) Error() string { return fmt.Sprintf("read body: %v", e.err) }
+func (e *bodyReadError) Unwrap() error { return e.err }
 
 // FetchOptions are per-call options for web_fetch.
 type FetchOptions struct {
@@ -248,13 +282,31 @@ func (c *Client) FetchWithOptions(ctx context.Context, rawURL string, fo FetchOp
 		return c.render(ctx, u)
 	}
 
+	// PDF documents get a dedicated budget: picked up by URL hint up front,
+	// or by a one-shot retry when the response turned out to be a PDF and the
+	// plain timeout died mid-body (see isBodyReadDeadline).
+	timeout, hc := c.timeout, c.http
+	pdfHint := c.pdfHTTP != nil && looksLikePDF(u)
+	if pdfHint {
+		timeout, hc = c.pdfTimeout, c.pdfHTTP
+	}
 	direct := ctx
-	if c.timeout > 0 {
+	if timeout > 0 {
 		var cancel context.CancelFunc
-		direct, cancel = context.WithTimeout(ctx, c.timeout)
+		direct, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
 	}
-	page, err := c.fetchWithRetry(direct, u)
+	page, err := c.fetchWithRetry(direct, hc, u)
+	if err != nil && !pdfHint && c.pdfHTTP != nil && isPDFBodyDeadline(err) {
+		c.logger.Warn("[request] fetch retrying with pdf timeout",
+			"url", u.String(),
+			"pdf_timeout", c.pdfTimeout.String(),
+			"error", err.Error(),
+		)
+		retryCtx, cancel := context.WithTimeout(ctx, c.pdfTimeout)
+		defer cancel()
+		page, err = c.fetchWithRetry(retryCtx, c.pdfHTTP, u)
+	}
 	if err == nil {
 		return page, nil
 	}
@@ -311,10 +363,10 @@ func (c *Client) render(ctx context.Context, u *url.URL) (*Page, error) {
 	return c.renderer.Render(rctx, u, c.ua)
 }
 
-func (c *Client) fetchWithRetry(ctx context.Context, u *url.URL) (*Page, error) {
+func (c *Client) fetchWithRetry(ctx context.Context, hc *http.Client, u *url.URL) (*Page, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
-		page, err := c.doFetch(ctx, u)
+		page, err := c.doFetch(ctx, hc, u)
 		if err == nil {
 			return page, nil
 		}
@@ -331,14 +383,16 @@ func (c *Client) fetchWithRetry(ctx context.Context, u *url.URL) (*Page, error) 
 		)
 		select {
 		case <-ctx.Done():
-			return nil, ctx.Err()
+			// The deadline ran out during the backoff wait; the last attempt
+			// error is the meaningful failure (it may carry PDF-retry info).
+			return nil, lastErr
 		case <-time.After(delay):
 		}
 	}
 	return nil, lastErr
 }
 
-func (c *Client) doFetch(ctx context.Context, u *url.URL) (*Page, error) {
+func (c *Client) doFetch(ctx context.Context, hc *http.Client, u *url.URL) (*Page, error) {
 	reqID := newRequestID()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u.String(), nil)
@@ -356,7 +410,7 @@ func (c *Client) doFetch(ctx context.Context, u *url.URL) (*Page, error) {
 	)
 
 	start := time.Now()
-	resp, err := c.http.Do(req)
+	resp, err := hc.Do(req)
 	if err != nil {
 		c.logger.Error("[request] fetch failed", "request_id", reqID, "error", err.Error())
 		return nil, fmt.Errorf("fetch %s: %w", u.String(), err)
@@ -387,7 +441,22 @@ func (c *Client) processResponse(resp *http.Response, reqID string, start time.T
 	body, err := io.ReadAll(io.LimitReader(resp.Body, c.maxBody))
 	if err != nil {
 		c.logger.Error("[response] fetch read failed", "request_id", reqID, "error", err.Error())
-		return nil, fmt.Errorf("read body: %w", err)
+		// Carrying the content type lets the caller decide on a PDF-budget
+		// retry without re-fetching blind.
+		return nil, &bodyReadError{contentType: mediaType, err: err}
+	}
+
+	// Parse PDF bodies into plain text when requested. This runs before the
+	// binary-media rejection: application/pdf is handled, not discarded (the
+	// magic-byte sniff also catches mislabeled PDF responses).
+	if isPDF(mediaType, body) {
+		text, perr := parsePDF(resp.Request.URL.String(), body)
+		if perr == nil {
+			body = text
+			mediaType = "text/plain"
+		} else {
+			c.logger.Warn("[response] fetch pdf parse failed", "request_id", reqID, "error", perr.Error())
+		}
 	}
 
 	// Reject binary media payloads early so the model never receives junk.
@@ -399,16 +468,6 @@ func (c *Client) processResponse(resp *http.Response, reqID string, start time.T
 			"bytes", len(body),
 		)
 		return nil, fmt.Errorf("fetch %s: content-type %q is binary media, not supported", resp.Request.URL.String(), mediaType)
-	}
-
-	// Parse PDF bodies into plain text when requested.
-	if isPDF(mediaType, body) {
-		text, perr := parsePDF(resp.Request.URL.String(), body)
-		if perr == nil {
-			body = text
-		} else {
-			c.logger.Warn("[response] fetch pdf parse failed", "request_id", reqID, "error", perr.Error())
-		}
 	}
 
 	title := extractTitle(body)
@@ -535,7 +594,7 @@ func isMediaType(ct string) bool {
 		}
 	}
 	switch ct {
-	case "application/octet-stream", "application/pdf", "application/zip", "application/gzip",
+	case "application/octet-stream", "application/zip", "application/gzip",
 		"application/x-gzip", "application/x-tar", "application/x-7z-compressed",
 		"application/x-rar-compressed", "application/vnd.rar", "application/x-msdownload":
 		return true
@@ -553,6 +612,29 @@ func isPDF(ct string, body []byte) bool {
 		return true
 	}
 	return false
+}
+
+// looksLikePDF reports whether the URL path suggests a PDF document
+// (example.com/paper.pdf, arxiv.org/pdf/1706.03762). It only selects the
+// longer PDF timeout up front; content-type/magic-byte detection still runs
+// on the response.
+func looksLikePDF(u *url.URL) bool {
+	if u == nil {
+		return false
+	}
+	p := strings.ToLower(u.Path)
+	return strings.HasSuffix(p, ".pdf") || strings.Contains(p, "/pdf/")
+}
+
+// isPDFBodyDeadline reports whether err came from the response body read
+// hitting the deadline on a response that is a PDF (by content type) — the
+// typical signature of a heavy PDF that outlived the plain fetch timeout.
+func isPDFBodyDeadline(err error) bool {
+	var bre *bodyReadError
+	if !errors.As(err, &bre) {
+		return false
+	}
+	return errors.Is(bre.err, context.DeadlineExceeded) && isPDF(bre.contentType, nil)
 }
 
 // parsePDF extracts text from an in-memory PDF and returns it as bytes. The
